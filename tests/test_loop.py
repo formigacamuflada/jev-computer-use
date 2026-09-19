@@ -116,3 +116,23 @@ def test_confianca_baixa_escala_em_vez_de_agir():
     run = agent.run("clicar em Salvar")
     assert run.outcome == "escalate"
     assert driver.executed == []
+
+
+def test_must_include_garante_o_alvo_na_tabela():
+    """Regressao: a voz resolvia um alvo entre 321 elementos e o Jev recebia
+    uma tabela de 24 que nao o continha, entao abstinha ou escolhia mal."""
+    muitos = [Element(f"e{i}", "Button", f"Botao {i}", index=i) for i in range(60)]
+    observation = Observation("s1", "App", "janela", muitos, pid=1, window_id=2)
+
+    sem = build_candidates(observation, max_candidates=10)
+    assert not any("Botao 55" in c.description for c in sem)
+
+    com = build_candidates(observation, max_candidates=10, must_include="Botao 55")
+    assert any("Botao 55" in c.description for c in com)
+    assert len(com) <= 10 + 2   # o teto e respeitado (fora reobserve/abstain)
+
+
+def test_must_include_inexistente_nao_quebra():
+    observation = Observation("s1", "App", "j", [Element("e1", "Button", "Salvar")])
+    candidates = build_candidates(observation, must_include="Nao Existe")
+    assert any(c.tool == "click" for c in candidates)

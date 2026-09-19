@@ -47,12 +47,42 @@ def normalizar(texto: str) -> str:
     return _ESPACOS.sub(" ", limpo).strip().lower()
 
 
+def _contem_palavras(maior: str, menor: str) -> bool:
+    """`menor` aparece em `maior` como sequencia inteira de palavras.
+
+    Substring crua casa "parado" dentro de "separado", e foi assim que dizer
+    "separado" clicou em "Parado (0)". Exigir fronteira de palavra corrige.
+    """
+    a = maior.split()
+    b = menor.split()
+    if not b or len(b) > len(a):
+        return False
+    return any(a[i : i + len(b)] == b for i in range(len(a) - len(b) + 1))
+
+
+def falavel(rotulo: str) -> bool:
+    """Rotulo que uma pessoa conseguiria dizer em voz alta.
+
+    A arvore de UI traz IDs internos gigantes como
+    "Application.MainWindow.centralWidget...DownloadedPiecesBar". Eles nao sao
+    comandos; poluem o vocabulario e produzem casamentos absurdos.
+    """
+    texto = rotulo.strip()
+    if not texto or len(texto) > 60:
+        return False
+    if texto.count(".") >= 3 and " " not in texto:
+        return False
+    return True
+
+
 def frases_para(rotulos: list[str], *, max_rotulos: int = 60) -> list[str]:
     """Monta o vocabulario: um verbo x rotulo para cada elemento acionavel."""
     frases: list[str] = list(COMANDOS_FIXOS)
     vistos: set[str] = set()
 
     for rotulo in rotulos[:max_rotulos]:
+        if not falavel(rotulo):
+            continue
         alvo = normalizar(rotulo)
         # Rotulo de uma letra ou vazio nao da uma frase pronunciavel.
         if len(alvo) < 2 or alvo in vistos:
@@ -80,6 +110,8 @@ def casar(falado: str, rotulos: list[str]) -> str | None:
 
     melhor: tuple[int, str] | None = None
     for rotulo in rotulos:
+        if not falavel(rotulo):
+            continue
         alvo = normalizar(rotulo)
         if not alvo:
             continue
@@ -91,7 +123,7 @@ def casar(falado: str, rotulos: list[str]) -> str | None:
         # coisa, e um falso positivo aqui vira clique errado.
         if len(dito) < _MIN_CASAMENTO or len(alvo) < _MIN_CASAMENTO:
             continue
-        if dito in alvo or alvo in dito:
+        if _contem_palavras(alvo, dito) or _contem_palavras(dito, alvo):
             # Pontua pelo rotulo, nao pelo falado: entre varios que servem,
             # o mais especifico ganha.
             pontos = len(alvo)

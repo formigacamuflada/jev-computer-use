@@ -65,7 +65,14 @@ class Agent:
     def _emit(self, kind: str, text: str) -> None:
         self._on_event(kind, text)
 
-    def run(self, goal: str, *, app: str | None = None, dry_run: bool = False) -> Run:
+    def run(
+        self,
+        goal: str,
+        *,
+        app: str | None = None,
+        dry_run: bool = False,
+        must_include: str | None = None,
+    ) -> Run:
         history: list[dict[str, Any]] = []
         steps: list[Step] = []
         # Reobservar so ajuda se a tela mudar. Sem progresso, para de girar.
@@ -84,6 +91,7 @@ class Agent:
                 observation,
                 text_to_type=_text_argument(goal),
                 max_candidates=self._config.max_candidates,
+                must_include=must_include,
             )
             if len(candidates) <= 2:  # so reobserve/abstain
                 return Run(goal, "error", steps, "nenhuma acao possivel na tela observada")

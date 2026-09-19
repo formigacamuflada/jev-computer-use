@@ -91,8 +91,10 @@ def main(argv: list[str] | None = None) -> int:
 
     agent = Agent(driver, chooser, config, on_event=lambda kind, text: print(f"[{kind}] {text}"))
 
-    def handle(goal: str) -> None:
-        run = agent.run(goal, app=args.app, dry_run=args.dry_run)
+    def handle(goal: str, must_include: str | None = None) -> None:
+        run = agent.run(
+            goal, app=args.app, dry_run=args.dry_run, must_include=must_include
+        )
         line = f"{run.outcome}: {run.message}"
         print(f"\n=> {line}")
         speaker.say(OUTCOME_SPEECH.get(run.outcome, "") + " " + run.message)
@@ -180,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             goal = f"clicar em {alvo}"
             print(f"[alvo] {alvo!r}")
+            handle(goal, must_include=alvo)
+            continue
 
         handle(goal)
     return 0

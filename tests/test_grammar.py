@@ -122,3 +122,27 @@ def test_saida_real_do_modelo_small_ainda_casa():
 def test_fragmento_curto_nao_casa():
     # "com" casaria com "Com erro" por substring; curto demais para confiar.
     assert casar("com", ROTULOS) is None
+
+
+# --- fronteira de palavra e rotulos nao falaveis ------------------------
+
+def test_substring_nao_basta_precisa_ser_palavra():
+    """Regressao: dizer "separado" clicou em "Parado (0)".
+
+    "parado" e substring de "separado", mas nao e uma palavra dele.
+    """
+    assert casar("separado", ["Parado (0)"]) is None
+    assert casar("parado", ["Parado (0)"]) == "Parado (0)"
+    assert casar("upload parado", ["Upload parado (7)"]) == "Upload parado (7)"
+
+
+def test_id_interno_de_ui_nao_entra_no_vocabulario():
+    """Regressao: "qtab" casou com um ID de automacao gigante."""
+    from jevcu.voice.grammar import falavel
+
+    lixo = ("Application.MainWindow.centralWidget.QTabWidget."
+            "PropertiesWidget.DownloadedPiecesBar")
+    assert not falavel(lixo)
+    assert falavel("Ferramentas")
+    assert falavel("Sem etiqueta (12)")
+    assert casar("qtab", [lixo, "Ferramentas"]) is None

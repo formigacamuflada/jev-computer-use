@@ -23,18 +23,39 @@ def build_candidates(
     *,
     text_to_type: str | None = None,
     max_candidates: int = 24,
+    must_include: str | None = None,
 ) -> list[Candidate]:
-    """Monta a tabela imutavel de acoes completas para esta observacao."""
-    candidates: list[Candidate] = []
+    """Monta a tabela imutavel de acoes completas para esta observacao.
 
+    `must_include` e o nome de um elemento que precisa estar na tabela mesmo
+    que caia fora do teto. Sem isso, a camada de voz resolve um alvo entre os
+    321 elementos da tela e o Jev recebe uma lista de 24 que nao o contem --
+    ele entao escolhe mal ou se abstem, e parece que errou quando na verdade
+    a pergunta e que estava errada.
+    """
+    candidates: list[Candidate] = []
+    reservado: Candidate | None = None
+
+    if must_include:
+        alvo = next(
+            (e for e in observation.elements if e.name == must_include and e.enabled),
+            None,
+        )
+        if alvo is not None:
+            reservado = _candidate_for(alvo, observation, text_to_type)
+
+    teto = max_candidates - 1 if reservado is not None else max_candidates
     for element in observation.elements:
-        if len(candidates) >= max_candidates:
+        if len(candidates) >= teto:
             break
         if not element.enabled or not element.name:
             continue
         candidate = _candidate_for(element, observation, text_to_type)
         if candidate is not None:
             candidates.append(candidate)
+
+    if reservado is not None and not any(c.id == reservado.id for c in candidates):
+        candidates.append(reservado)
 
     # reobserve e abstain sempre presentes: sao a saida segura quando a
     # evidencia esta velha, incompleta ou ambigua.

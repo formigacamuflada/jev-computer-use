@@ -12,6 +12,7 @@ Regra que vem do SKILL.md do cua e nao se quebra:
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Mapping, Protocol
@@ -109,12 +110,20 @@ def parse_response(payload: Mapping[str, Any], candidates: list[Candidate]) -> C
 class LiveJev:
     """Cliente HTTP do Jev."""
 
-    def __init__(self, api_key: str, *, model: str = "jev-latest", timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        model: str = "jev-latest",
+        timeout: float = 30.0,
+        retries: int = 3,
+    ) -> None:
         if not api_key:
             raise ValueError("TYPESAFE_API_KEY ausente")
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        self._retries = max(1, retries)
 
     def __call__(
         self,
@@ -141,17 +150,30 @@ class LiveJev:
                 "Content-Type": "application/json",
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:400]
-            # A chave nunca entra na mensagem de erro.
-            raise DecisionError(f"Jev HTTP {exc.code}: {detail}") from None
-        except urllib.error.URLError as exc:
-            raise DecisionError(f"Jev inacessivel: {exc.reason}") from None
 
-        return parse_response(payload, candidates)
+        ultimo = ""
+        for tentativa in range(1, self._retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self._timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                return parse_response(payload, candidates)
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")[:400]
+                # A chave nunca entra na mensagem de erro.
+                if exc.code == 429 and tentativa < self._retries:
+                    time.sleep(2 * tentativa)
+                    continue
+                raise DecisionError(f"Jev HTTP {exc.code}: {detail}") from None
+            except (urllib.error.URLError, OSError) as exc:
+                # TimeoutError e socket.timeout sao OSError e nao chegam
+                # embrulhados em URLError; sem este ramo eles sobem crus e
+                # derrubam a sessao inteira.
+                ultimo = getattr(exc, "reason", None) or str(exc)
+                if tentativa < self._retries:
+                    time.sleep(1.5 * tentativa)
+                    continue
+
+        raise DecisionError(f"Jev inacessivel apos {self._retries} tentativas: {ultimo}")
 
 
 def mock_chooser(
