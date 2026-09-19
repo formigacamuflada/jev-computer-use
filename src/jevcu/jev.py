@@ -22,6 +22,7 @@ from .contracts import (
     Candidate,
     Choice,
     DecisionError,
+    Usage,
     criteria_from,
     validate_confidence,
     validate_probabilities,
@@ -80,7 +81,11 @@ def build_request(
     }
 
 
-def parse_response(payload: Mapping[str, Any], candidates: list[Candidate]) -> Choice:
+def parse_response(
+    payload: Mapping[str, Any],
+    candidates: list[Candidate],
+    latency_ms: float = 0.0,
+) -> Choice:
     criteria = criteria_from(candidates)
     answers = payload.get("answers")
     if not isinstance(answers, Mapping):
@@ -98,12 +103,20 @@ def parse_response(payload: Mapping[str, Any], candidates: list[Candidate]) -> C
     confidence = validate_confidence(answer.get("confidence", 0.0))
     model = payload.get("model")
 
+    consumo = payload.get("usage") or {}
+    usage = Usage(
+        latency_ms=latency_ms,
+        input_tokens=int(consumo.get("input_tokens") or 0),
+        output_tokens=int(consumo.get("output_tokens") or 0),
+    )
+
     return Choice(
         selected_id=str(selected),
         confidence=confidence,
         probabilities=probabilities,
         model=model if isinstance(model, str) else None,
         source="live",
+        usage=usage,
     )
 
 
@@ -159,10 +172,12 @@ class LiveJev:
 
         ultimo = ""
         for tentativa in range(1, self._retries + 1):
+            comeco = time.perf_counter()
             try:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
-                return parse_response(payload, candidates)
+                decorrido = (time.perf_counter() - comeco) * 1000
+                return parse_response(payload, candidates, latency_ms=decorrido)
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")[:400]
                 # A chave nunca entra na mensagem de erro.
@@ -188,12 +203,13 @@ def mock_chooser(
     observation: Mapping[str, Any],
     history: list[dict[str, Any]],
     candidates: list[Candidate],
-) -> Choice:
+) -> Choice:  # noqa: D401
     """Escolha deterministica por sobreposicao de palavras. Roda sem credencial.
 
     Existe para o loop inteiro ser exercitavel e testavel offline. Nao tenta
     imitar a qualidade do Jev -- so precisa ser estavel e previsivel.
     """
+    comeco = time.perf_counter()
     criteria = criteria_from(candidates)
     goal_words = {w for w in _words(goal) if len(w) > 2}
 
@@ -229,6 +245,7 @@ def mock_chooser(
         probabilities=probabilities,
         model="mock",
         source="mock",
+        usage=Usage(latency_ms=(time.perf_counter() - comeco) * 1000),
     )
 
 

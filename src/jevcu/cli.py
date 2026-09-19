@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 from .candidates import build_candidates, describe_table
 from .config import Config, load_typesafe_key
@@ -23,6 +24,31 @@ OUTCOME_SPEECH = {
 }
 
 
+def _metricas(run, stt_ms: float = 0.0) -> str:
+    """Linha compacta de desempenho do ciclo.
+
+    Os dados vivem em `run.timing()` e em `choice.usage`, estruturados -- isto
+    aqui e so a renderizacao para terminal. Uma UI le os mesmos campos.
+    """
+    t = run.timing()
+    partes = []
+    if stt_ms:
+        partes.append(f"voz {stt_ms:.0f}ms")
+    partes.append(f"tela {t['observe_ms']:.0f}ms")
+    partes.append(f"jev {t['decide_ms']:.0f}ms")
+    if t["execute_ms"]:
+        partes.append(f"acao {t['execute_ms']:.0f}ms")
+
+    uso = next((s.choice.usage for s in reversed(run.steps) if s.choice.usage), None)
+    if uso and uso.input_tokens:
+        partes.append(f"{uso.input_tokens} tok")
+        partes.append(f"{uso.tokens_per_second:,.0f} tok/s")
+        partes.append(f"US${uso.cost_usd:.6f}")
+
+    total = t["total_ms"] + stt_ms
+    return " | ".join(partes) + f"  (total {total:.0f}ms)"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jevcu", description="Computer use por voz com Jev")
     parser.add_argument("goal", nargs="*", help="comando (se vazio, entra em modo interativo)")
@@ -35,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--show-table", action="store_true", help="imprimir a tabela e sair")
     parser.add_argument("--list-mics", action="store_true", help="listar entradas de audio e sair")
     parser.add_argument("--mic", type=int, help="indice do microfone (backend whisper)")
+    parser.add_argument(
+        "--quiet-metrics", action="store_true", help="nao mostrar tempos e tokens"
+    )
     parser.add_argument(
         "--model", default="small",
         help="modelo do whisper. tiny NAO serve para pt-BR (medido: 0 de 5 acertos)",
@@ -98,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         goal: str,
         must_include: str | None = None,
         speech_hint: dict | None = None,
+        stt_ms: float = 0.0,
     ) -> bool:
         """Devolve False quando o usuario interrompeu a decisao."""
         ao_vivo = args.decide == "live"
@@ -120,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("\r" + " " * 42 + "\r", end="")
 
         print(f"=> {run.outcome}: {run.message}")
+        if not args.quiet_metrics:
+            print("   " + _metricas(run, stt_ms))
         speaker.say(OUTCOME_SPEECH.get(run.outcome, "") + " " + run.message)
         return True
 
@@ -168,8 +200,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[ouvindo] {observation.window_title[:50]} "
                   f"({len(rotulos)} elementos, {len(phrases)} frases)")
 
+        marca = time.perf_counter()
         try:
             falado = listener.listen(phrases)
+            stt_ms = (time.perf_counter() - marca) * 1000
             falhas = 0
         except KeyboardInterrupt:
             break
@@ -215,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                 falado,
                 must_include=alvo,
                 speech_hint={"heard": falado, "recognizer_guess": alvo},
+                stt_ms=stt_ms,
             ):
                 break
             continue
@@ -228,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         print("[intencao] sem rotulo obvio; deixando o Jev decidir")
-        if not handle(falado):
+        if not handle(falado, stt_ms=stt_ms):
             break
     return 0
 

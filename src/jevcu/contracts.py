@@ -46,6 +46,39 @@ class Candidate:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """Custo e velocidade de uma decisao.
+
+    Estruturado de proposito: serve tanto para a linha de log quanto para uma
+    UI ler depois, sem ninguem ter que reparsear texto.
+    """
+
+    latency_ms: float
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def tokens_per_second(self) -> float:
+        """Tokens de entrada por segundo. E o que o Jev cobra e processa."""
+        if self.latency_ms <= 0:
+            return 0.0
+        return self.input_tokens / (self.latency_ms / 1000.0)
+
+    @property
+    def cost_usd(self) -> float:
+        """Jev cobra US$42 por bilhao de tokens de entrada; saida e gratis."""
+        return self.input_tokens * 42.0 / 1_000_000_000
+
+    def resumo(self) -> str:
+        if not self.input_tokens:
+            return f"{self.latency_ms:.0f} ms"
+        return (
+            f"{self.latency_ms:.0f} ms | {self.input_tokens} tok | "
+            f"{self.tokens_per_second:,.0f} tok/s | US${self.cost_usd:.6f}"
+        )
+
+
+@dataclass(frozen=True)
 class Choice:
     """Resposta normalizada do provider de decisao."""
 
@@ -54,6 +87,7 @@ class Choice:
     probabilities: dict[str, float]
     model: str | None = None
     source: str = "mock"
+    usage: Usage | None = None
 
 
 class DecisionError(ValueError):

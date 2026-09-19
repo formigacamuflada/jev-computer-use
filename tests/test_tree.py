@@ -86,9 +86,21 @@ def test_drill_em_ref_inexistente_falha():
 
 def test_fit_respeita_o_orcamento():
     tree = _wide_tree(20, 30)   # 600+ nos
-    fitted = fit(tree, budget_tokens=500)
-    assert fitted.tokens <= 500
+    fitted = fit(tree, budget_tokens=2000)
+    assert fitted.tokens <= 2000
     assert fitted.depth >= 1
+
+
+def test_orcamento_impossivel_devolve_o_minimo():
+    """Abaixo do menor esqueleto possivel, cortar mais perderia a raiz.
+
+    O contrato e explicito: devolve o minimo viavel mesmo estourando, em vez
+    de devolver nada.
+    """
+    tree = _wide_tree(20, 30)
+    fitted = fit(tree, budget_tokens=10)
+    assert fitted.nodes >= 1
+    assert fitted.depth == 1
 
 
 def test_fit_aproveita_orcamento_maior():

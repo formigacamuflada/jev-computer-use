@@ -51,14 +51,21 @@ class Node:
         return None
 
 
-def estimate_tokens(payload: Any) -> int:
-    """Estimativa grosseira: ~4 caracteres por token em JSON compacto.
+# Calibrado contra o `usage` real do Jev em tres orcamentos diferentes:
+# a razao real/estimado ficou em 2.33, 2.37 e 2.47. A regra de 4 caracteres
+# por token vale para prosa em ingles; este payload e JSON com muita pontuacao,
+# refs e texto em portugues, que tokeniza bem pior.
+CHARS_PER_TOKEN = 1.7
 
-    Serve para decidir profundidade, nao para faturar. O numero real vem no
-    campo `usage` da resposta do Jev.
+
+def estimate_tokens(payload: Any) -> int:
+    """Estimativa do custo em tokens de um payload.
+
+    Serve para escolher a profundidade do esqueleto, nao para faturar -- o
+    numero autoritativo vem no campo `usage` da resposta.
     """
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return max(1, len(text) // 4)
+    return max(1, int(len(text) / CHARS_PER_TOKEN))
 
 
 def _is_noise(node: Node) -> bool:

@@ -92,6 +92,28 @@ scripts/ocr.ps1   helper WinRT do OCR
 tests/            14 testes, rodam offline
 ```
 
+## Medições por ciclo
+
+Cada decisão imprime uma linha de desempenho, e os mesmos dados ficam
+estruturados em `run.timing()` e `choice.usage` — uma UI lê os campos sem
+reparsear texto. Desligue com `--quiet-metrics`.
+
+```
+tela 318ms | jev 712ms | 6941 tok | 9.753 tok/s | US$0.000292  (total 1030ms)
+```
+
+`Usage` traz `latency_ms`, `input_tokens`, `output_tokens`, e derivados
+`tokens_per_second` e `cost_usd` (US$42 por bilhão de tokens de entrada; saída
+é gratuita). `run.timing()` separa `observe_ms`, `decide_ms` e `execute_ms` —
+útil porque observar a tela às vezes custa mais que decidir.
+
+**O estimador de tokens estava errado por 2,4×.** A régua de 4 caracteres por
+token vale para prosa em inglês; este payload é JSON com muita pontuação, refs
+e português. Medido contra o `usage` real em três orçamentos, a razão
+real/estimado deu 2,33, 2,37 e 2,47. Recalibrado para 1,7 caractere por token,
+o orçamento voltou a significar o que diz: o mesmo `budget_tokens=6000` passou
+de 15.612 tokens reais para 6.941, com metade do custo.
+
 ## Jev ao vivo
 
 ```powershell

@@ -14,6 +14,7 @@ Segue os passos do skills/jev-use/SKILL.md do cua:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -34,6 +35,14 @@ class Step:
     candidate: Candidate | None
     executed: bool
     note: str = ""
+    # Tempo de cada etapa, para diagnostico e para uma UI mostrar depois.
+    observe_ms: float = 0.0
+    decide_ms: float = 0.0
+    execute_ms: float = 0.0
+
+    @property
+    def total_ms(self) -> float:
+        return self.observe_ms + self.decide_ms + self.execute_ms
 
 
 @dataclass
@@ -46,6 +55,20 @@ class Run:
     @property
     def actions_taken(self) -> int:
         return sum(1 for step in self.steps if step.executed)
+
+    @property
+    def total_ms(self) -> float:
+        return sum(step.total_ms for step in self.steps)
+
+    def timing(self) -> dict[str, float]:
+        """Tempo por etapa somado. A soma nao e so o Jev: observar a tela
+        costuma custar mais que decidir."""
+        return {
+            "observe_ms": sum(s.observe_ms for s in self.steps),
+            "decide_ms": sum(s.decide_ms for s in self.steps),
+            "execute_ms": sum(s.execute_ms for s in self.steps),
+            "total_ms": self.total_ms,
+        }
 
 
 class Agent:
@@ -82,10 +105,12 @@ class Agent:
 
         for index in range(self._config.max_steps):
             # (1) observacao nova a cada iteracao -- refs sao locais a ela
+            marca = time.perf_counter()
             try:
                 observation = self._driver.observe(app)
             except DriverError as exc:
                 return Run(goal, "error", steps, f"falha ao observar: {exc}")
+            observe_ms = (time.perf_counter() - marca) * 1000
 
             # (4) tabela limitada de acoes completas
             candidates = build_candidates(
@@ -105,6 +130,7 @@ class Agent:
                 # original, e o Jev confirmava qualquer coisa: contar uma
                 # historia com a palavra "parado" virava um clique.
                 compacta["speech"] = speech_hint
+            marca = time.perf_counter()
             try:
                 choice = self._chooser(
                     goal=goal,
@@ -114,6 +140,7 @@ class Agent:
                 )
             except DecisionError as exc:
                 return Run(goal, "error", steps, f"falha na decisao: {exc}")
+            decide_ms = (time.perf_counter() - marca) * 1000
 
             # (6) resolver contra a tabela original imutavel -- falha fechado
             try:
@@ -128,7 +155,8 @@ class Agent:
             # (6b) politica de confianca
             if choice.confidence < self._config.floor_threshold:
                 stalled += 1
-                steps.append(Step(index, observation, choice, candidate, False, "confianca no chao"))
+                steps.append(Step(index, observation, choice, candidate, False, "confianca no chao",
+                     observe_ms, decide_ms))
                 history.append(_history_entry(candidate, choice, executed=False))
                 if stalled >= max_stalled:
                     self._emit("escalate", "Confianca baixa e a tela nao muda.")
@@ -137,7 +165,8 @@ class Agent:
                 continue
 
             if choice.confidence < self._config.act_threshold:
-                steps.append(Step(index, observation, choice, candidate, False, "escalado"))
+                steps.append(Step(index, observation, choice, candidate, False, "escalado",
+                     observe_ms, decide_ms))
                 self._emit(
                     "escalate",
                     f"Nao tenho certeza ({choice.confidence:.0%}): {candidate.description}",
@@ -145,13 +174,15 @@ class Agent:
                 return Run(goal, "escalate", steps, candidate.description)
 
             if candidate.id == ABSTAIN:
-                steps.append(Step(index, observation, choice, candidate, False, "abstain"))
+                steps.append(Step(index, observation, choice, candidate, False, "abstain",
+                     observe_ms, decide_ms))
                 self._emit("abstain", "Nenhuma acao segura para esta tela.")
                 return Run(goal, "abstained", steps, "abstencao")
 
             if candidate.id == REOBSERVE:
                 stalled += 1
-                steps.append(Step(index, observation, choice, candidate, False, "reobserve"))
+                steps.append(Step(index, observation, choice, candidate, False, "reobserve",
+                     observe_ms, decide_ms))
                 history.append(_history_entry(candidate, choice, executed=False))
                 if stalled >= max_stalled:
                     self._emit("escalate", "Pedi observacao nova varias vezes sem avancar.")
@@ -159,19 +190,24 @@ class Agent:
                 continue
 
             if dry_run:
-                steps.append(Step(index, observation, choice, candidate, False, "dry-run"))
+                steps.append(Step(index, observation, choice, candidate, False, "dry-run",
+                     observe_ms, decide_ms))
                 self._emit("dry", f"[dry-run] {candidate.tool} {dict(candidate.arguments)}")
                 return Run(goal, "done", steps, candidate.description)
 
             # (7) no maximo UMA acao por iteracao
             assert candidate.tool is not None
+            marca = time.perf_counter()
             try:
                 self._driver.execute(candidate.tool, dict(candidate.arguments))
             except DriverError as exc:
-                steps.append(Step(index, observation, choice, candidate, False, str(exc)))
+                steps.append(Step(index, observation, choice, candidate, False, str(exc),
+                                  observe_ms, decide_ms))
                 return Run(goal, "error", steps, f"falha ao executar: {exc}")
+            execute_ms = (time.perf_counter() - marca) * 1000
 
-            steps.append(Step(index, observation, choice, candidate, True))
+            steps.append(Step(index, observation, choice, candidate, True, "",
+                              observe_ms, decide_ms, execute_ms))
             history.append(_history_entry(candidate, choice, executed=True))
             self._emit("acted", candidate.description)
 
