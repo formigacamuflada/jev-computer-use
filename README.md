@@ -92,6 +92,31 @@ scripts/ocr.ps1   helper WinRT do OCR
 tests/            14 testes, rodam offline
 ```
 
+## Jev ao vivo
+
+```powershell
+.\scriptsoz.ps1 -Texto        # ainda usa o mock
+python -m jevcu --driver cua --app qbittorrent --decide live --dry-run clicar em Semeando
+```
+
+Medido contra o qBittorrent real, 321 elementos, state de 5791 tokens,
+26 candidatos:
+
+| comando | Jev escolheu | confiança |
+|---|---|---|
+| `clicar em Semeando` | `Semeando (12)` | 100% |
+| `quero ver o que já terminou de baixar` | `Completado (12)` | 96% |
+| `faz alguma coisa ai` | **abstenção** | 61% |
+
+~900 ms por decisão. O segundo caso é o que importa: ele resolveu intenção em
+português natural — "já terminou de baixar" para "Completado" — sem nenhuma
+palavra em comum. E o comando vago caiu abaixo do limiar de 0.85, então o
+agente não agiu, que é exatamente o desenho.
+
+A documentação avisa que inglês é a língua primária do Jev. Em português os
+resultados acima foram bons, mas as `instructions` e os `criteria` continuam em
+inglês de propósito; só o `state` carrega português.
+
 ## Voz (pt-BR)
 
 O lançador cria o venv do projeto e instala as dependências na primeira
@@ -159,13 +184,21 @@ vocabulário serve aos dois backends, de formas diferentes.
 Verificado nesta máquina:
 
 ```
-modelo tiny pronto em 0.8 s   backend cuda/float16 (RTX 3060 Ti)
-gravação de 3 s sem fala  ->  None, como esperado
+backend escolhido            cpu/int8   (CUDA presente mas sem cuBLAS)
+carga + aquecimento          2.0 s
+transcrever 3 s de áudio     ~145 ms    (~20x tempo real)
 ```
 
+**Não instale as bibliotecas CUDA.** O `ctranslate2` enxerga a RTX 3060 Ti, mas
+faltam as DLLs de runtime (`cublas64_12.dll`), e a falha só aparece na primeira
+inferência — construir o modelo na GPU tem sucesso enganoso. Por isso a seleção
+de backend roda uma transcrição de aquecimento antes de confiar na GPU. Na CPU
+o 9800X3D transcreve 3 s de fala em ~145 ms, então a GPU não faria diferença
+para comandos curtos.
+
 O `small` (~480 MB) não terminou de baixar aqui — a rede oscilou e parou em
-131 MB. O `tiny` (~75 MB) basta para validar o caminho; troque depois com
-`-Modelo small` para mais precisão.
+131 MB. O `tiny` (~75 MB) basta; troque com `-Modelo small` se precisar de mais
+precisão.
 
 Escolher o microfone explicitamente também é uma vantagem: o `winrt` depende do
 padrão do sistema, aqui o dispositivo é um parâmetro.

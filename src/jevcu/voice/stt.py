@@ -212,24 +212,46 @@ class WhisperListener:
                 "backend 'whisper' exige:  pip install faster-whisper sounddevice numpy"
             ) from exc
 
-        backend, precisao = self._pick_backend(compute)
-        self._model = WhisperModel(model_size, device=backend, compute_type=precisao)
+        self._model, self.backend = self._load(WhisperModel, model_size, compute)
         self._language = language
         self._device = device
         self._max_seconds = max_seconds
-        self.backend = f"{backend}/{precisao}"
 
     @staticmethod
-    def _pick_backend(compute: str | None) -> tuple[str, str]:
-        """GPU quando houver; senao CPU com int8, que ainda e utilizavel."""
+    def _load(WhisperModel, model_size: str, compute: str | None):
+        """Tenta a GPU de verdade, e cai para CPU se ela nao servir.
+
+        Ter GPU nao basta: o ctranslate2 conta os dispositivos CUDA sem checar
+        se as bibliotecas de runtime existem. Numa maquina sem cuBLAS o
+        contador diz 1 e a carga estoura com "cublas64_12.dll is not found".
+        So construir o modelo prova que o caminho funciona.
+        """
+        tentativas: list[tuple[str, str]] = []
         try:
             import ctranslate2
 
             if ctranslate2.get_cuda_device_count() > 0:
-                return "cuda", compute or "float16"
+                tentativas.append(("cuda", compute or "float16"))
         except Exception:
             pass
-        return "cpu", compute or "int8"
+        tentativas.append(("cpu", compute or "int8"))
+
+        import numpy as np
+
+        # Meio segundo de silencio so para forcar o caminho de inferencia.
+        # Construir o modelo na GPU e preguicoso: as bibliotecas CUDA so sao
+        # carregadas na primeira transcricao, e e la que falta a cuBLAS.
+        aquecimento = np.zeros(8000, dtype=np.float32)
+
+        ultimo: Exception | None = None
+        for dispositivo, precisao in tentativas:
+            try:
+                modelo = WhisperModel(model_size, device=dispositivo, compute_type=precisao)
+                list(modelo.transcribe(aquecimento, language="pt", beam_size=1)[0])
+                return modelo, f"{dispositivo}/{precisao}"
+            except Exception as exc:
+                ultimo = exc
+        raise RuntimeError(f"nao foi possivel carregar o modelo {model_size!r}: {ultimo}")
 
     @staticmethod
     def dispositivos() -> list[tuple[int, str, bool]]:
@@ -243,28 +265,52 @@ class WhisperListener:
                 saida.append((indice, info["name"], indice == padrao))
         return saida
 
+    # Sem audio nenhum por este tempo, o dispositivo e considerado mudo.
+    DEAD_DEVICE_S = 3.0
+
     def _gravar(self):
-        """Grava ate o usuario parar de falar, ou ate o teto de tempo."""
+        """Grava ate a pessoa parar de falar, com prazo de parede.
+
+        Usa callback e fila em vez de `stream.read()`: um `read` bloqueante
+        nunca retorna quando o dispositivo para de entregar amostras, e a
+        sessao inteira congela sem erro nenhum.
+        """
+        import queue
+        import time
+
         import numpy as np
         import sounddevice as sd
 
         bloco = int(self.RATE * self.BLOCK)
         blocos_silencio_parar = int(self.SILENCE_TO_STOP / self.BLOCK)
-        max_blocos = int(self._max_seconds / self.BLOCK)
+        fila: queue.Queue = queue.Queue()
+
+        def receber(indata, _frames, _time, _status):
+            fila.put(indata[:, 0].copy())
 
         pedacos: list = []
         silencio = 0
         falou = False
+        recebeu_algo = False
 
         with sd.InputStream(
             samplerate=self.RATE, channels=1, dtype="float32",
-            blocksize=bloco, device=self._device,
-        ) as stream:
-            for _ in range(max_blocos):
-                dados, _overflow = stream.read(bloco)
-                amostra = dados[:, 0]
-                pedacos.append(amostra.copy())
+            blocksize=bloco, device=self._device, callback=receber,
+        ):
+            prazo = time.monotonic() + self._max_seconds
+            while time.monotonic() < prazo:
+                try:
+                    amostra = fila.get(timeout=0.5)
+                except queue.Empty:
+                    if not recebeu_algo and time.monotonic() > prazo - self._max_seconds + self.DEAD_DEVICE_S:
+                        raise RuntimeError(
+                            "o dispositivo de entrada nao entregou audio nenhum. "
+                            "Veja as opcoes com --list-mics e escolha outra com --mic."
+                        )
+                    continue
 
+                recebeu_algo = True
+                pedacos.append(amostra)
                 rms = float(np.sqrt(np.mean(amostra**2)))
                 if rms >= self.SILENCE_RMS:
                     falou = True
@@ -274,7 +320,7 @@ class WhisperListener:
                     if silencio >= blocos_silencio_parar:
                         break
 
-        if not falou:
+        if not falou or not pedacos:
             return None
         audio = np.concatenate(pedacos)
         if len(audio) < self.RATE * self.MIN_SPEECH:
