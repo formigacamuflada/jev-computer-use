@@ -10,6 +10,7 @@ from .config import Config, load_typesafe_key
 from .driver import CuaDriver, DriverError, MockDriver, UiaDriver
 from .jev import get_chooser
 from .loop import Agent
+from .voice.grammar import casar, frases_para
 from .voice.stt import get_listener
 from .voice.tts import get_speaker
 
@@ -86,12 +87,59 @@ def main(argv: list[str] | None = None) -> int:
 
     # Modo interativo / por voz
     listener = get_listener(stt_backend, language=config.language)
+    por_voz = stt_backend != "text"
     print(f"modo interativo (stt={stt_backend}, driver={driver_backend}, jev={args.decide})")
-    print("Ctrl+C ou linha vazia para sair.\n")
+    if por_voz:
+        print("Fale um comando. Ctrl+C para sair.")
+        speaker.say("Estou ouvindo.")
+    else:
+        print("Ctrl+C ou linha vazia para sair.")
+    print()
+
     while True:
-        goal = listener.listen()
-        if not goal:
+        phrases = None
+        rotulos: list[str] = []
+
+        if por_voz:
+            # O vocabulario vem da tela: o motor offline precisa de uma lista
+            # fechada, e os elementos acionaveis ja sao exatamente isso.
+            try:
+                observation = driver.observe(args.app)
+            except DriverError as exc:
+                print(f"erro ao observar: {exc}")
+                break
+            rotulos = [e.name for e in observation.elements if e.name and e.enabled]
+            phrases = frases_para(rotulos)
+            print(f"[ouvindo] {observation.window_title[:50]} "
+                  f"({len(rotulos)} elementos, {len(phrases)} frases)")
+
+        try:
+            falado = listener.listen(phrases)
+        except KeyboardInterrupt:
             break
+        except (RuntimeError, ValueError) as exc:
+            print(f"erro no reconhecimento: {exc}")
+            break
+
+        if not falado:
+            if por_voz:
+                continue          # silencio: volta a ouvir
+            break
+
+        print(f"[ouvi] {falado!r}")
+        if falado.lower() in {"parar", "cancelar", "esquece"}:
+            speaker.say("Parando.")
+            break
+
+        # Traduz o falado para o rotulo exato da tela, que e o que as
+        # descricoes dos candidatos usam.
+        goal = falado
+        if rotulos:
+            alvo = casar(falado, rotulos)
+            if alvo:
+                goal = f"clicar em {alvo}"
+                print(f"[alvo] {alvo!r}")
+
         handle(goal)
     return 0
 

@@ -6,7 +6,11 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-winrt = ["winsdk>=1.0.0b10"]
+winrt = [
+    "winrt-runtime>=3.2",
+    "winrt-Windows.Media.SpeechRecognition>=3.2",
+    "winrt-Windows.Globalization>=3.2",
+]
 whisper = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.26"]
 dev = ["pytest>=8.0"]
 

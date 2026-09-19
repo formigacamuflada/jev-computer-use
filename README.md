@@ -92,6 +92,51 @@ scripts/ocr.ps1   helper WinRT do OCR
 tests/            14 testes, rodam offline
 ```
 
+## Voz (pt-BR)
+
+```bash
+pip install winrt-runtime winrt-Windows.Media.SpeechRecognition winrt-Windows.Globalization
+set PYTHONPATH=src
+python -m jevcu --stt winrt --driver cua --app qbittorrent --dry-run
+```
+
+**O vocabulário sai da tela.** O reconhecimento offline do Windows exige uma
+lista fechada de frases — o que parece limitação, mas casa com a arquitetura:
+o espaço de ações já é fechado. A cada volta do loop o agente observa a janela,
+gera `verbo × rótulo` para cada elemento acionável e recompila a gramática.
+Vocabulário fechado também eleva muito a acurácia: o motor escolhe entre N
+frases conhecidas em vez de transcrever português aberto.
+
+Medido no qBittorrent ao vivo: **321 elementos → 290 frases, compiladas em 238 ms.**
+O casamento tolera o que a tela mostra a mais — falar `"baixando"` acerta o
+rótulo `"Baixando (0)"`.
+
+### O que foi verificado e o que não
+
+| | |
+|---|---|
+| Criar recognizer pt-BR | ✅ de processo Python desktop não empacotado |
+| Compilar gramática offline | ✅ `SpeechRecognitionResultStatus.SUCCESS` |
+| Gramática de tela real | ✅ 290 frases em 238 ms |
+| Casamento fala → rótulo | ✅ coberto por teste |
+| **Reconhecer voz humana** | ⬜ **não testado — exige alguém falando** |
+
+### Notas de plataforma
+
+`winsdk` **não serve**: sem wheel para Python 3.14 e exige Visual Studio para
+compilar (esta máquina só tem TDM-GCC). Os pacotes `winrt-*` por namespace têm
+wheel cp314 e funcionam.
+
+`System.Speech` também não serve — nenhum recognizer instalado nesta máquina.
+
+O **ditado online está desligado** (a política de fala online nunca foi aceita),
+então o modo nuvem está fora. Só o modo gramática offline funciona — que é o
+que queremos de qualquer forma, por privacidade e latência.
+
+PowerShell não consegue hospedar isto: `SpeechRecognizer.Constraints` volta como
+`System.__ComObject` sem o método `Add` projetado. Limitação da projeção WinRT
+do PowerShell para `IVector<T>`, não do motor.
+
 ## Cua Driver
 
 ```powershell
