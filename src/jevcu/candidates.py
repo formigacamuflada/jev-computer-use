@@ -80,15 +80,25 @@ def build_candidates(
 def _target_args(element: Element, observation: Observation) -> dict[str, object]:
     """Como o Driver identifica o alvo.
 
-    Com pid/window_id do Cua Driver usamos element_index, que e o contrato dele.
-    Sem eles (UiaDriver, mock) cai numa ref local ao snapshot.
+    O `element_token` e a forma certa: ele carrega o snapshot e o indice juntos.
+    Mandar `element_index` sozinho e recusado -- "bare element_index is not
+    accepted" --, e como a recusa nao vinha marcada como erro, o projeto
+    anunciava sucesso em cima de cliques que o Driver nunca executou. Um indice
+    sem token so vale acompanhado do snapshot que o produziu.
+
+    Sem pid (UiaDriver, mock) cai numa ref local ao snapshot.
     """
-    if observation.pid is not None and element.index is not None:
-        return {
-            "pid": observation.pid,
-            "window_id": observation.window_id,
-            "element_index": element.index,
-        }
+    if observation.pid is None:
+        return {"ref": f"@{observation.snapshot_id}:{element.ref}"}
+
+    alvo: dict[str, object] = {"pid": observation.pid, "window_id": observation.window_id}
+    if element.token:
+        alvo["element_token"] = element.token
+        return alvo
+    if element.index is not None:
+        alvo["element_index"] = element.index
+        alvo["snapshot_id"] = observation.snapshot_id
+        return alvo
     return {"ref": f"@{observation.snapshot_id}:{element.ref}"}
 
 

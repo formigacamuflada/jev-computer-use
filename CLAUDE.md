@@ -50,6 +50,14 @@ mesma pergunta feita duas vezes.** O Jev não responde 50/50 a um empate exato
 — desempata pela primeira chave e ainda relata confiança alta. O loop lia isso
 como certeza. Hoje `build_candidates` descarta descrição repetida.
 
+Uma quinta, de outra natureza: **tratar recusa como sucesso.** O Cua Driver
+recusa uma ação sem marcar `isError` — a recusa vem em
+`structuredContent.status == "refused"` com um objeto `refusal`. Lendo só o
+`isError`, uma sessão inteira anunciou `[acted]` e `done` para seis cliques que
+o Driver nunca executou. Falha que se parece com êxito é a pior de todas: sem a
+mensagem da recusa não havia nem diagnóstico. Hoje `raise_if_refused` sobe a
+mensagem inteira.
+
 Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord para
 256 tokens de um orçamento de 6000 — isso é perda de informação, não economia.
 
@@ -67,6 +75,14 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
 - **CUDA não funciona aqui**: falta `cublas64_12.dll`. Detectar isso custa
   109 ms; tentar construir na GPU custa 23 s antes de falhar. CPU int8
   transcreve 3 s de áudio em ~145 ms — a GPU não faria diferença.
+- **O clique vai por `element_token`, nunca por `element_index` cru.** O token
+  é `snapshot:índice` e carrega os dois. Índice sozinho é recusado com
+  `snapshot_id_required`; com índice é obrigatório mandar o `snapshot_id`
+  junto. Vale igual para `click` e `type_text`.
+- **Janela minimizada não aceita clique.** O Driver recusa com
+  `window_minimized` e diz o que fazer: `bring_to_front` e re-observar. O
+  projeto não faz isso sozinho — roubaria o foco, que é justamente o que o
+  `delivery_mode: background` existe para evitar.
 - **Apps UWP devolvem 0 elementos** pela árvore de acessibilidade, inclusive
   pelo Cua Driver. O contorno é o OCR: medido nas Configurações do Windows,
   0 elementos viram 52 linhas de texto e 24 candidatos clicáveis, com acentos

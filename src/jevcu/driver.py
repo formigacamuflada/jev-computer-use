@@ -100,6 +100,30 @@ class Driver(Protocol):
 DEFAULT_BINARY = "cua-driver"
 
 
+def raise_if_refused(tool: str, result: dict[str, Any]) -> None:
+    """Levanta DriverError quando o Driver recusou a acao.
+
+    A recusa nao vem marcada em `isError`: ela chega em
+    `structuredContent.status == "refused"` com um objeto `refusal`. Ler so o
+    isError fazia toda recusa passar por sucesso, e o loop anunciava "[acted]"
+    e "done" para cliques que nunca aconteceram -- o pior tipo de falha, a que
+    se parece com exito.
+
+    A mensagem da recusa e o diagnostico e vai inteira para cima: e ela que
+    diz "a janela esta minimizada" ou "mande element_token em vez do indice".
+    """
+    content = result.get("structuredContent")
+    if not isinstance(content, dict):
+        return
+    recusa = content.get("refusal")
+    if not isinstance(recusa, dict) and content.get("status") != "refused":
+        return
+    recusa = recusa if isinstance(recusa, dict) else {}
+    codigo = recusa.get("code") or content.get("code") or "refused"
+    detalhe = str(recusa.get("message") or "")[:300]
+    raise DriverError(f"{tool} recusado ({codigo}): {detalhe}")
+
+
 def build_tree(elements: list[dict[str, Any]], *, window_title: str) -> Node:
     """Reconstroi a arvore a partir da lista plana e dos `parent_index`.
 
@@ -185,6 +209,8 @@ class CuaDriver:
 
         if result.get("isError"):
             raise DriverError(f"{tool}: {str(result)[:300]}")
+
+        raise_if_refused(tool, result)
         return result
 
     def list_windows(self, pid: int | None = None) -> list[dict[str, Any]]:
