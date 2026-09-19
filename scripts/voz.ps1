@@ -10,9 +10,10 @@ param(
     [string]$App = "qbittorrent",
     [switch]$Executar,
     [switch]$Texto,
-    [switch]$Whisper,      # faster-whisper local na GPU, em vez do motor do Windows
+    [switch]$Whisper,      # faster-whisper local, em vez do motor do Windows
+    [switch]$Jev,          # decide com o Jev de verdade em vez do mock
     [int]$Mic = -1,        # indice do microfone; veja -ListarMics
-    [string]$Modelo = "small",
+    [string]$Modelo = "small",   # tiny NAO serve para pt-BR
     [switch]$ListarMics
 )
 
@@ -65,6 +66,10 @@ if ($ListarMics) {
 }
 
 $argumentos = @("-m", "jevcu", "--driver", "cua", "--app", $App)
+if ($Jev) { $argumentos += @("--decide", "live") }
+if ($Modelo -eq "tiny") {
+    Write-Host "aviso: o modelo tiny erra quase tudo em portugues (medido: 0 de 5)." -ForegroundColor Yellow
+}
 if ($Texto)        { $argumentos += @("--stt", "text") }
 elseif ($Whisper)  { $argumentos += @("--stt", "whisper", "--model", $Modelo) }
 else               { $argumentos += @("--stt", "winrt") }
@@ -77,7 +82,8 @@ if ($Executar) {
     Write-Host "dry-run: decide e fala, mas nao clica. Use -Executar para valer." -ForegroundColor Cyan
 }
 $modo = if ($Texto) { "texto" } elseif ($Whisper) { "whisper $Modelo" } else { "winrt pt-BR" }
-Write-Host ("alvo: {0} | voz: {1}" -f $App, $modo)
+$cerebro = if ($Jev) { "Jev ao vivo" } else { "mock" }
+Write-Host ("alvo: {0} | voz: {1} | decisao: {2}" -f $App, $modo, $cerebro)
 Write-Host ""
 
 Push-Location $raiz

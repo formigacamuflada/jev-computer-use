@@ -88,3 +88,37 @@ def test_sem_correspondencia_devolve_none():
 def test_prefere_a_correspondencia_mais_especifica():
     rotulos = ["Parado (0)", "Upload parado (7)"]
     assert casar("upload parado", rotulos) == "Upload parado (7)"
+
+
+# --- rejeicao de ruido -------------------------------------------------
+# Transcricoes reais de uma sessao com o modelo tiny em pt-BR. Sem rejeitar,
+# "selecioni com o ejo" chegou ao decisor e virou um clique em "Com erro (0)".
+
+ROTULOS = [
+    "Sistema", "Restaurar", "Fechar", "Todos (12)", "Baixando (0)",
+    "Semeando (12)", "Completado (12)", "Com erro (0)", "Arquivo", "Editar",
+]
+
+
+def test_ruido_de_transcricao_nao_casa_com_nada():
+    for texto in [
+        "aperta da olvida.",
+        "selecioni com o ejo.",
+        "Viva, viva, viva, viva.",
+        "very ficando.",
+        "vai irta",
+        "abra a abra a abra a sente queta",
+    ]:
+        assert casar(texto, ROTULOS) is None, f"{texto!r} nao devia casar"
+
+
+def test_saida_real_do_modelo_small_ainda_casa():
+    # Transcricoes que o small produziu no mesmo audio onde o tiny falhou.
+    assert casar("Clic em Baixando.", ROTULOS) == "Baixando (0)"
+    assert casar("Abrir a aba arquivo.", ROTULOS) == "Arquivo"
+    assert casar("vai com erro.", ROTULOS) == "Com erro (0)"
+
+
+def test_fragmento_curto_nao_casa():
+    # "com" casaria com "Com erro" por substring; curto demais para confiar.
+    assert casar("com", ROTULOS) is None

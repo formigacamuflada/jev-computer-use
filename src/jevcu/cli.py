@@ -35,7 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--show-table", action="store_true", help="imprimir a tabela e sair")
     parser.add_argument("--list-mics", action="store_true", help="listar entradas de audio e sair")
     parser.add_argument("--mic", type=int, help="indice do microfone (backend whisper)")
-    parser.add_argument("--model", default="small", help="modelo do whisper (tiny|base|small|medium)")
+    parser.add_argument(
+        "--model", default="small",
+        help="modelo do whisper. tiny NAO serve para pt-BR (medido: 0 de 5 acertos)",
+    )
     return parser
 
 
@@ -168,9 +171,15 @@ def main(argv: list[str] | None = None) -> int:
         goal = falado
         if rotulos:
             alvo = casar(falado, rotulos)
-            if alvo:
-                goal = f"clicar em {alvo}"
-                print(f"[alvo] {alvo!r}")
+            if alvo is None:
+                # Transcricao que nao casa com nada na tela nao vira decisao.
+                # Sem isto, ruido como "selecioni com o ejo" chega ao decisor
+                # e pode virar um clique: em modo real, um clique errado.
+                print("[nao entendi] nenhum elemento da tela corresponde")
+                speaker.say("Nao entendi.")
+                continue
+            goal = f"clicar em {alvo}"
+            print(f"[alvo] {alvo!r}")
 
         handle(goal)
     return 0

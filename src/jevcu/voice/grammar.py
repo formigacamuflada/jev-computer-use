@@ -31,6 +31,9 @@ _ESPACOS = re.compile(r"\s+")
 # Contador entre parenteses: "Semeando (12)". Muda a cada segundo em apps como
 # o qBittorrent. Se entrar no vocabulario, a gramatica e recompilada sem parar.
 _CONTADOR = re.compile(r"\s*\(\s*\d[\d.,]*\s*\)\s*")
+# Trecho minimo para aceitar um casamento parcial. Abaixo disto, ruido
+# de transcricao casaria com quase qualquer rotulo.
+_MIN_CASAMENTO = 4
 
 
 def normalizar(texto: str) -> str:
@@ -83,9 +86,15 @@ def casar(falado: str, rotulos: list[str]) -> str | None:
         if alvo == dito:
             return rotulo
         # Casamento parcial: o rotulo na tela costuma ter mais que o falado
-        # ("Semeando (12)" para "semeando").
-        if dito and (dito in alvo or alvo in dito):
-            pontos = len(dito)
+        # ("Semeando (12)" para "semeando"). Exige trecho longo o bastante --
+        # transcricao ruim produz fragmentos curtos que casariam com qualquer
+        # coisa, e um falso positivo aqui vira clique errado.
+        if len(dito) < _MIN_CASAMENTO or len(alvo) < _MIN_CASAMENTO:
+            continue
+        if dito in alvo or alvo in dito:
+            # Pontua pelo rotulo, nao pelo falado: entre varios que servem,
+            # o mais especifico ganha.
+            pontos = len(alvo)
             if melhor is None or pontos > melhor[0]:
                 melhor = (pontos, rotulo)
 

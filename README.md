@@ -157,6 +157,35 @@ rótulo `"Baixando (0)"`.
 | Casamento fala → rótulo | ✅ coberto por teste |
 | **Reconhecer voz humana** | ⬜ **não testado — exige alguém falando** |
 
+### Escolha do modelo: o tiny não serve para português
+
+Mesmo áudio (voz Maria pt-BR sintetizada), os dois modelos na CPU:
+
+| esperado | tiny | small |
+|---|---|---|
+| clique em baixando | `Fliking by Shandu` | `Clic em Baixando` |
+| clique em semeando | `Flikin semendo` | `Clique em Semeando` ✅ |
+| abrir a aba arquivo | `abri-ra-abarquivo` | `Abrir a aba arquivo` ✅ |
+| aba editar | `Aba e de tarde` | `Hava a editar` |
+| quero ver o que já terminou | `o que dia e terminou` | `o que Jay terminou de baixar` |
+
+O `tiny` acertou zero. O `small` acerta ou chega perto o bastante para o
+casamento resolver. **`small` é o padrão**; o lançador avisa se você pedir
+`tiny`. Custo: 0,6 s contra 3,4 s para as cinco frases, o que é irrelevante
+para comandos isolados.
+
+Diagnóstico importante: quando a transcrição sai errada assim, o padrão é
+fonético — "baixa ando" para "baixando". Isso é o modelo ouvindo certo e
+escrevendo errado, não microfone ruim. Microfone com problema produz silêncio,
+cortes ou palavras sem nenhuma relação.
+
+### Ruído não vira ação
+
+Uma transcrição que não corresponde a nenhum elemento da tela é **descartada
+antes do decisor**. Sem isso, `"selecioni com o ejo"` chegou ao chooser e virou
+um clique em "Com erro (0)" — em modo real, um clique errado de verdade. O
+casamento parcial também passou a exigir trecho de pelo menos 4 caracteres.
+
 ### Plano B: faster-whisper
 
 O backend `winrt` funciona isoladamente nesta máquina mas falha dentro da
