@@ -33,12 +33,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="decidir sem executar")
     parser.add_argument("--no-speak", action="store_true", help="nao falar as respostas")
     parser.add_argument("--show-table", action="store_true", help="imprimir a tabela e sair")
+    parser.add_argument("--list-mics", action="store_true", help="listar entradas de audio e sair")
+    parser.add_argument("--mic", type=int, help="indice do microfone (backend whisper)")
+    parser.add_argument("--model", default="small", help="modelo do whisper (tiny|base|small|medium)")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = Config.from_env()
+
+    if args.list_mics:
+        from .voice.stt import WhisperListener
+
+        print("entradas de audio disponiveis:\n")
+        for indice, nome, padrao in WhisperListener.dispositivos():
+            marca = "  <== padrao do sistema" if padrao else ""
+            print(f"  [{indice:>2}] {nome[:52]}{marca}")
+        print("\nescolha uma com:  --mic <indice>")
+        return 0
 
     driver_backend = args.driver or config.driver_backend
     stt_backend = args.stt or config.stt_backend
@@ -86,9 +99,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Modo interativo / por voz
-    listener = get_listener(stt_backend, language=config.language)
+    listener = get_listener(
+        stt_backend, language=config.language, mic=args.mic, model=args.model
+    )
     por_voz = stt_backend != "text"
-    print(f"modo interativo (stt={stt_backend}, driver={driver_backend}, jev={args.decide})")
+    detalhe = stt_backend
+    if stt_backend == "whisper":
+        detalhe += f" {args.model} em {getattr(listener, 'backend', '?')}"
+    print(f"modo interativo (stt={detalhe}, driver={driver_backend}, jev={args.decide})")
     if por_voz:
         print("Fale um comando. Ctrl+C para sair.")
         speaker.say("Estou ouvindo.")

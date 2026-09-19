@@ -132,6 +132,33 @@ rótulo `"Baixando (0)"`.
 | Casamento fala → rótulo | ✅ coberto por teste |
 | **Reconhecer voz humana** | ⬜ **não testado — exige alguém falando** |
 
+### Plano B: faster-whisper
+
+O backend `winrt` funciona isoladamente nesta máquina mas falha dentro da
+aplicação, sempre em `criando o recognizer`, com `0x800455A0`. Testei e
+descartei: contagem de frases, criação do event loop, síntese de voz logo
+antes, processo segurando o microfone, permissão de app desktop, e o próprio
+caminho do lançador. Rodando o código idêntico fora da sessão do usuário, passa.
+Não foi reproduzido — a causa está em algo da sessão interativa.
+
+O `whisper` contorna o problema inteiro: não toca no runtime de fala do Windows.
+
+```powershell
+.\scriptsoz.ps1 -Whisper                # local, na GPU
+.\scriptsoz.ps1 -ListarMics             # índices das entradas
+.\scriptsoz.ps1 -Whisper -Mic 15        # escolher a entrada
+.\scriptsoz.ps1 -Whisper -Modelo tiny   # mais rápido, menos preciso
+```
+
+Escolhe CUDA quando disponível (`float16`) e cai para CPU (`int8`) quando não.
+Grava com detecção de silêncio: para sozinho ~1,2 s depois que você cala, em vez
+de esperar um tempo fixo. As frases da tela entram como `initial_prompt`, o que
+enviesa a transcrição rumo aos termos visíveis sem restringi-la — o mesmo
+vocabulário serve aos dois backends, de formas diferentes.
+
+Escolher o microfone explicitamente também é uma vantagem: o `winrt` depende do
+padrão do sistema, aqui o dispositivo é um parâmetro.
+
 ### Armadilhas do motor de fala
 
 **Feche o recognizer antes de criar outro.** Ele segura o dispositivo de

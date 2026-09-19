@@ -179,36 +179,138 @@ class WinRtListener:
 
 
 class WhisperListener:
-    """faster-whisper local. Portugues aberto, sem vocabulario fechado."""
+    """faster-whisper local, gravando pelo sounddevice.
 
-    def __init__(self, model_size: str = "small", language: str = "pt") -> None:
+    Nao toca no runtime de fala do Windows -- contorna o subsistema inteiro
+    que produz 0x800455A0. Tambem deixa escolher o dispositivo de entrada
+    explicitamente, em vez de depender do padrao do sistema.
+
+    O vocabulario da tela nao vira gramatica fechada aqui, mas entra como
+    `initial_prompt` para enviesar a transcricao rumo aos termos visiveis.
+    """
+
+    # Grava ate `max_seconds`, mas corta antes quando o silencio se estende.
+    RATE = 16_000
+    BLOCK = 0.1            # segundos por bloco analisado
+    SILENCE_RMS = 0.012    # abaixo disto conta como silencio
+    SILENCE_TO_STOP = 1.2  # segundos de silencio que encerram a fala
+    MIN_SPEECH = 0.3       # fala mais curta que isto e ruido
+
+    def __init__(
+        self,
+        model_size: str = "small",
+        language: str = "pt",
+        *,
+        device: int | str | None = None,
+        max_seconds: float = 12.0,
+        compute: str | None = None,
+    ) -> None:
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
             raise RuntimeError(
                 "backend 'whisper' exige:  pip install faster-whisper sounddevice numpy"
             ) from exc
-        self._model = WhisperModel(model_size, device="cuda", compute_type="float16")
-        self._language = language
 
-    def listen(self, phrases: list[str] | None = None, seconds: float = 5.0) -> str | None:
+        backend, precisao = self._pick_backend(compute)
+        self._model = WhisperModel(model_size, device=backend, compute_type=precisao)
+        self._language = language
+        self._device = device
+        self._max_seconds = max_seconds
+        self.backend = f"{backend}/{precisao}"
+
+    @staticmethod
+    def _pick_backend(compute: str | None) -> tuple[str, str]:
+        """GPU quando houver; senao CPU com int8, que ainda e utilizavel."""
+        try:
+            import ctranslate2
+
+            if ctranslate2.get_cuda_device_count() > 0:
+                return "cuda", compute or "float16"
+        except Exception:
+            pass
+        return "cpu", compute or "int8"
+
+    @staticmethod
+    def dispositivos() -> list[tuple[int, str, bool]]:
+        """(indice, nome, e_padrao) de cada entrada disponivel."""
+        import sounddevice as sd
+
+        padrao = sd.default.device[0]
+        saida = []
+        for indice, info in enumerate(sd.query_devices()):
+            if info["max_input_channels"] > 0:
+                saida.append((indice, info["name"], indice == padrao))
+        return saida
+
+    def _gravar(self):
+        """Grava ate o usuario parar de falar, ou ate o teto de tempo."""
         import numpy as np
         import sounddevice as sd
 
-        audio = sd.rec(int(seconds * 16000), samplerate=16000, channels=1, dtype="float32")
-        sd.wait()
-        segments, _ = self._model.transcribe(
-            np.squeeze(audio), language=self._language, beam_size=1
+        bloco = int(self.RATE * self.BLOCK)
+        blocos_silencio_parar = int(self.SILENCE_TO_STOP / self.BLOCK)
+        max_blocos = int(self._max_seconds / self.BLOCK)
+
+        pedacos: list = []
+        silencio = 0
+        falou = False
+
+        with sd.InputStream(
+            samplerate=self.RATE, channels=1, dtype="float32",
+            blocksize=bloco, device=self._device,
+        ) as stream:
+            for _ in range(max_blocos):
+                dados, _overflow = stream.read(bloco)
+                amostra = dados[:, 0]
+                pedacos.append(amostra.copy())
+
+                rms = float(np.sqrt(np.mean(amostra**2)))
+                if rms >= self.SILENCE_RMS:
+                    falou = True
+                    silencio = 0
+                elif falou:
+                    silencio += 1
+                    if silencio >= blocos_silencio_parar:
+                        break
+
+        if not falou:
+            return None
+        audio = np.concatenate(pedacos)
+        if len(audio) < self.RATE * self.MIN_SPEECH:
+            return None
+        return audio
+
+    def listen(self, phrases: list[str] | None = None) -> str | None:
+        audio = self._gravar()
+        if audio is None:
+            return None
+
+        # As frases da tela enviesam a transcricao sem restringi-la.
+        dica = ", ".join(phrases[:40]) if phrases else None
+
+        segmentos, _info = self._model.transcribe(
+            audio,
+            language=self._language,
+            beam_size=1,
+            initial_prompt=dica,
+            vad_filter=True,
         )
-        text = " ".join(segment.text for segment in segments).strip()
-        return text or None
+        texto = " ".join(s.text for s in segmentos).strip()
+        return texto or None
 
 
-def get_listener(backend: str, *, language: str = "pt-BR") -> Listener:
+def get_listener(
+    backend: str,
+    *,
+    language: str = "pt-BR",
+    mic: int | None = None,
+    model: str = "small",
+) -> Listener:
     if backend == "text":
         return TextListener()
     if backend == "winrt":
         return WinRtListener(language)
     if backend == "whisper":
-        return WhisperListener(language=language.split("-")[0])
+        return WhisperListener(model, language=language.split("-")[0], device=mic)
     raise ValueError(f"backend de STT desconhecido: {backend!r}")

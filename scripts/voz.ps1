@@ -9,7 +9,11 @@
 param(
     [string]$App = "qbittorrent",
     [switch]$Executar,
-    [switch]$Texto
+    [switch]$Texto,
+    [switch]$Whisper,      # faster-whisper local na GPU, em vez do motor do Windows
+    [int]$Mic = -1,        # indice do microfone; veja -ListarMics
+    [string]$Modelo = "small",
+    [switch]$ListarMics
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,8 +58,17 @@ if (-not (Test-Path $py)) {
 $env:PYTHONPATH = Join-Path $raiz "src"
 $env:JEVCU_DRIVER_BIN = $bin
 
+if ($ListarMics) {
+    Push-Location $raiz
+    try { & $py -m jevcu --list-mics } finally { Pop-Location }
+    exit 0
+}
+
 $argumentos = @("-m", "jevcu", "--driver", "cua", "--app", $App)
-if ($Texto) { $argumentos += @("--stt", "text") } else { $argumentos += @("--stt", "winrt") }
+if ($Texto)        { $argumentos += @("--stt", "text") }
+elseif ($Whisper)  { $argumentos += @("--stt", "whisper", "--model", $Modelo) }
+else               { $argumentos += @("--stt", "winrt") }
+if ($Mic -ge 0)    { $argumentos += @("--mic", "$Mic") }
 if (-not $Executar) { $argumentos += "--dry-run" }
 
 if ($Executar) {
@@ -63,7 +76,8 @@ if ($Executar) {
 } else {
     Write-Host "dry-run: decide e fala, mas nao clica. Use -Executar para valer." -ForegroundColor Cyan
 }
-Write-Host ("alvo: {0} | voz: {1}" -f $App, $(if ($Texto) { "texto" } else { "pt-BR" }))
+$modo = if ($Texto) { "texto" } elseif ($Whisper) { "whisper $Modelo" } else { "winrt pt-BR" }
+Write-Host ("alvo: {0} | voz: {1}" -f $App, $modo)
 Write-Host ""
 
 Push-Location $raiz
