@@ -36,6 +36,8 @@ class Config:
     act_threshold: float = 0.85
     # Abaixo disso nem vale escalar: reobserva.
     floor_threshold: float = 0.40
+    # Rede ruim nao pode travar a sessao: o Jev responde em ~900 ms.
+    jev_timeout: float = 8.0
 
     # --- loop ---
     max_steps: int = 12
@@ -68,6 +70,7 @@ class Config:
             model=_s("JEVCU_MODEL", cls.model),
             act_threshold=_f("JEVCU_ACT_THRESHOLD", cls.act_threshold),
             floor_threshold=_f("JEVCU_FLOOR_THRESHOLD", cls.floor_threshold),
+            jev_timeout=_f("JEVCU_JEV_TIMEOUT", cls.jev_timeout),
             max_steps=_i("JEVCU_MAX_STEPS", cls.max_steps),
             max_candidates=_i("JEVCU_MAX_CANDIDATES", cls.max_candidates),
             stt_backend=_s("JEVCU_STT", cls.stt_backend),

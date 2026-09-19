@@ -75,7 +75,10 @@ def main(argv: list[str] | None = None) -> int:
     # --- Jev ---
     try:
         chooser = get_chooser(
-            args.decide, api_key=load_typesafe_key(), model=config.model
+            args.decide,
+            api_key=load_typesafe_key(),
+            model=config.model,
+            timeout=config.jev_timeout,
         )
     except ValueError as exc:
         print(f"erro: {exc}", file=sys.stderr)
@@ -91,13 +94,26 @@ def main(argv: list[str] | None = None) -> int:
 
     agent = Agent(driver, chooser, config, on_event=lambda kind, text: print(f"[{kind}] {text}"))
 
-    def handle(goal: str, must_include: str | None = None) -> None:
-        run = agent.run(
-            goal, app=args.app, dry_run=args.dry_run, must_include=must_include
-        )
-        line = f"{run.outcome}: {run.message}"
-        print(f"\n=> {line}")
+    def handle(goal: str, must_include: str | None = None) -> bool:
+        """Devolve False quando o usuario interrompeu a decisao."""
+        ao_vivo = args.decide == "live"
+        if ao_vivo:
+            print("[decidindo] consultando o Jev...", end="", flush=True)
+        try:
+            run = agent.run(
+                goal, app=args.app, dry_run=args.dry_run, must_include=must_include
+            )
+        except KeyboardInterrupt:
+            # Ctrl+C durante uma chamada lenta nao deve despejar traceback.
+            print("\n[cancelado]")
+            return False
+        finally:
+            if ao_vivo:
+                print("\r" + " " * 42 + "\r", end="")
+
+        print(f"=> {run.outcome}: {run.message}")
         speaker.say(OUTCOME_SPEECH.get(run.outcome, "") + " " + run.message)
+        return True
 
     if args.goal:
         handle(" ".join(args.goal))
@@ -177,7 +193,8 @@ def main(argv: list[str] | None = None) -> int:
         alvo = casar(falado, rotulos) if rotulos else None
         if alvo:
             print(f"[alvo] {alvo!r}")
-            handle(f"clicar em {alvo}", must_include=alvo)
+            if not handle(f"clicar em {alvo}", must_include=alvo):
+                break
             continue
 
         if args.decide == "mock":
@@ -189,7 +206,8 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         print("[intencao] sem rotulo obvio; deixando o Jev decidir")
-        handle(falado)
+        if not handle(falado):
+            break
     return 0
 
 

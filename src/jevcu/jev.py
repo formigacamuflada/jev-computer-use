@@ -108,15 +108,21 @@ def parse_response(payload: Mapping[str, Any], candidates: list[Candidate]) -> C
 
 
 class LiveJev:
-    """Cliente HTTP do Jev."""
+    """Cliente HTTP do Jev.
+
+    O timeout e curto de proposito. O Jev responde em cerca de 900 ms, entao
+    esperar 30 segundos nao recupera nada -- so trava a sessao. Com rede ruim,
+    o pior caso aqui fica em torno de 18 segundos em vez de 95, e o usuario
+    recebe um erro em vez de apertar Ctrl+C no meio.
+    """
 
     def __init__(
         self,
         api_key: str,
         *,
         model: str = "jev-latest",
-        timeout: float = 30.0,
-        retries: int = 3,
+        timeout: float = 8.0,
+        retries: int = 2,
     ) -> None:
         if not api_key:
             raise ValueError("TYPESAFE_API_KEY ausente")
@@ -161,7 +167,7 @@ class LiveJev:
                 detail = exc.read().decode("utf-8", "replace")[:400]
                 # A chave nunca entra na mensagem de erro.
                 if exc.code == 429 and tentativa < self._retries:
-                    time.sleep(2 * tentativa)
+                    time.sleep(1.5)
                     continue
                 raise DecisionError(f"Jev HTTP {exc.code}: {detail}") from None
             except (urllib.error.URLError, OSError) as exc:
@@ -170,7 +176,7 @@ class LiveJev:
                 # derrubam a sessao inteira.
                 ultimo = getattr(exc, "reason", None) or str(exc)
                 if tentativa < self._retries:
-                    time.sleep(1.5 * tentativa)
+                    time.sleep(1.0)
                     continue
 
         raise DecisionError(f"Jev inacessivel apos {self._retries} tentativas: {ultimo}")
@@ -231,7 +237,9 @@ def _words(text: str) -> set[str]:
     return set(cleaned.split())
 
 
-def get_chooser(backend: str, *, api_key: str | None, model: str) -> Chooser:
+def get_chooser(
+    backend: str, *, api_key: str | None, model: str, timeout: float = 8.0
+) -> Chooser:
     if backend == "mock":
         return mock_chooser
     if backend == "live":
@@ -239,5 +247,5 @@ def get_chooser(backend: str, *, api_key: str | None, model: str) -> Chooser:
             raise ValueError(
                 "backend 'live' exige TYPESAFE_API_KEY (ou jev-api-token.txt na raiz)"
             )
-        return LiveJev(api_key, model=model)
+        return LiveJev(api_key, model=model, timeout=timeout)
     raise ValueError(f"backend de decisao desconhecido: {backend!r}")
