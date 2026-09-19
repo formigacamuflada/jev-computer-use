@@ -148,9 +148,40 @@ src/jevcu/
 
 ## Pendências
 
-- UI (não começada) — os dados já saem estruturados em `run.timing()` e
-  `choice.usage` justamente para isso.
+Em ordem de valor, medida em uso real:
+
+1. **Usar o campo `actions` de cada elemento.** É a correção que faz o agente
+   funcionar de verdade. Hoje o projeto manda `invoke` em tudo: `Button`
+   obedece, mas `MenuItem` precisa de `expand` e `TreeItem`/`ListItem` precisam
+   de `select`, e esses simplesmente ignoram. Numa sessão em `-Executar`, só
+   três de treze cliques aconteceram. Verificado depois: quatro cliques
+   seguidos em `Button` (Geral, Velocidade, Conteúdo) mudaram a tela em todos.
+   Existe `invoke_menu` no Driver para o caso dos menus.
+
+2. **Push-to-talk.** Ideia do usuário, e os números dão razão: numa sessão real
+   a voz foi **58% do tempo total**, mediana de 7,6 s por comando, porque grava
+   até detectar 1,2 s de silêncio. Com tecla, dura o que você segura. Resolve
+   também o problema de conversa ambiente virar comando — `"ah, esqueci minhas
+   ferramentas, acho que deixei tudo em casa"` clicou em Ferramentas em modo
+   real. Mudar a entrada é mais eficaz que melhorar o julgamento.
+
+3. **UI.** Não começada. `run.timing()` e `choice.usage` já saem estruturados
+   para isso. O usuário quer: indicador ao apertar a tecla, barra com o que foi
+   falado, e os medidores.
+
+Menores:
+
+- **Janela do qBittorrent sumindo da barra de tarefas** durante uma sessão.
+  Investigado parcialmente: **não** é o cursor de agente (fica `position: None`,
+  ocioso — os cliques vão pela rota de acessibilidade e não movem cursor) e o
+  `window_id` não muda. Suspeita atual: o app está configurado para minimizar
+  para a bandeja, e o que o usuário viu foram os cliques em Minimizar/Restaurar
+  do próprio agente. **Não confirmado.**
+- `window_id` obsoleto depois de minimizar/restaurar derruba a observação com
+  `No window with window_id N exists`. Falta re-listar janelas quando isso
+  acontece.
 - Modelo `base` do whisper não testado em pt-BR; seria meio-termo entre o
   `tiny` (ruim) e o `small` (~10 s de carga por sessão).
 - `'clique em sem etiqueta'` escala a ~70% por ambiguidade real com o checkbox
   "Etiquetas" na mesma tela.
+- Pular a caminhada da árvore quando o app é UWP (ela devolve zero e custa 4 s).
