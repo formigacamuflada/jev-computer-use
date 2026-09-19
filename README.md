@@ -92,6 +92,44 @@ scripts/ocr.ps1   helper WinRT do OCR
 tests/            14 testes, rodam offline
 ```
 
+## Serialização da árvore de UI
+
+`tree.py` compacta a árvore antes de mandar pro Jev: visão rasa, ramos densos
+truncados com `children_count` e uma alça `drill`, e nós estruturais anônimos
+(`Pane`/`Group` sem nome) atravessados sem consumir profundidade.
+`fit(root, budget_tokens=N)` devolve o maior esqueleto que cabe no orçamento.
+
+`uia.py` + `scripts/uia_tree.ps1` leem a árvore real do Windows via UI Automation,
+sem instalar nada. É ponte até o Cua Driver — `UiaDriver` é **somente leitura**:
+`execute()` falha de propósito em vez de fingir que agiu.
+
+### Medições em janelas reais desta máquina
+
+```
+app              nós   leitura   acionáveis   árvore    esqueleto   redução
+qbittorrent      259    230 ms      167       3133 tok   1233 tok    60.6%
+chrome            79    107 ms       31        944 tok    643 tok    31.9%
+Discord           74     91 ms       20        821 tok    636 tok    22.5%
+```
+
+**Correção de uma premissa minha.** Eu disse que telas reais não caberiam nos
+32k de state do Jev. Não se confirmou: a janela mais densa aqui deu 3133 tokens,
+uma ordem de grandeza abaixo do limite. O esqueleto continua valendo a pena —
+60% menos tokens é mais barato e menos ruído pro modelo — mas não é o bloqueio
+que eu supus. Ele volta a importar em listas grandes (Explorer com milhares de
+arquivos, planilhas) e quando várias janelas entram no mesmo state.
+
+### Duas limitações do UIA que mudam o desenho
+
+**Conteúdo web é invisível.** A árvore do Chrome traz a casca do navegador
+(abas, barra de endereço, botões) e dois nós `Document` vazios — nenhum elemento
+da página. Para web, o caminho é CDP (o Cua Driver expõe `--cdp`) ou parsing
+visual, não UIA.
+
+**Apps UWP não descem.** `SystemSettings` e `ApplicationFrameHost` devolvem 1 nó.
+O handle é do frame host, não da janela real; precisa resolver o filho antes de
+caminhar.
+
 ## Notas de implementação
 
 **OCR via subprocess custa caro.** O OCR em si leva 151 ms, mas abrir um PowerShell por

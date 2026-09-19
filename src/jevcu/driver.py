@@ -13,6 +13,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .tree import Node, estimate_tokens, fit, interactive_nodes
+
 
 @dataclass(frozen=True)
 class Element:
@@ -41,14 +43,26 @@ class Observation:
     window_title: str
     elements: list[Element] = field(default_factory=list)
     capture_id: str | None = None
+    tree: Node | None = None
 
-    def compact(self, limit: int = 40) -> dict[str, Any]:
-        return {
-            "app": self.app,
-            "window": self.window_title,
-            "elements": [e.compact() for e in self.elements[:limit]],
-            "truncated": len(self.elements) > limit,
-        }
+    def compact(self, limit: int = 40, *, budget_tokens: int = 6000) -> dict[str, Any]:
+        """Forma que vai no state do Jev.
+
+        Com arvore, usa esqueleto ajustado ao orcamento: telas densas nao cabem
+        inteiras nos 32k do Jev. Sem arvore, cai na lista plana.
+        """
+        base: dict[str, Any] = {"app": self.app, "window": self.window_title}
+
+        if self.tree is not None:
+            payload, depth = fit(self.tree, budget_tokens=budget_tokens)
+            base["skeleton"] = payload
+            base["skeleton_depth"] = depth
+            base["est_tokens"] = estimate_tokens(payload)
+            return base
+
+        base["elements"] = [e.compact() for e in self.elements[:limit]]
+        base["truncated"] = len(self.elements) > limit
+        return base
 
 
 class DriverError(RuntimeError):
@@ -189,3 +203,48 @@ def _default_observation() -> Observation:
             Element("e6", "MenuItem", "Editar"),
         ],
     )
+
+
+class UiaDriver:
+    """Le a arvore de UI Automation do Windows e age por teclado/mouse.
+
+    Ponte ate o Cua Driver estar instalado: observa telas reais hoje, mas nao
+    executa acoes -- `execute` falha de proposito em vez de fingir sucesso.
+    """
+
+    def __init__(self, *, process: str | None = None, max_nodes: int = 1200) -> None:
+        self._process = process
+        self._max_nodes = max_nodes
+        self._counter = 0
+
+    def observe(self, app: str | None = None) -> Observation:
+        from .uia import UiaError, capture
+
+        target = app or self._process
+        try:
+            snapshot = capture(
+                process=target,
+                foreground=target is None,
+                max_nodes=self._max_nodes,
+            )
+        except (UiaError, ValueError) as exc:
+            raise DriverError(str(exc)) from None
+
+        self._counter += 1
+        elements = [
+            Element(ref=node.ref, role=node.role, name=node.name, enabled=node.enabled)
+            for node in interactive_nodes(snapshot.root)
+        ]
+        return Observation(
+            snapshot_id=f"s_uia_{self._counter}",
+            app=snapshot.app,
+            window_title=snapshot.window,
+            elements=elements,
+            tree=snapshot.root,
+        )
+
+    def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        raise DriverError(
+            "UiaDriver e somente leitura. Instale o Cua Driver para executar acoes: "
+            "irm https://cua.ai/driver/install.ps1 | iex"
+        )

@@ -9,6 +9,16 @@ param(
 $ErrorActionPreference = "Stop"
 # PowerShell 5.1 escreve no codepage ANSI por padrao; o JSON precisa sair em UTF-8.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# PowerShell 5.1 ignora [Console]::OutputEncoding quando o stdout esta
+# redirecionado, o que corrompe acentos. Escrever bytes UTF-8 direto no
+# handle padrao contorna a camada de texto inteira.
+function Write-Utf8Stdout([string]$text) {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    $out = [Console]::OpenStandardOutput()
+    $out.Write($bytes, 0, $bytes.Length)
+    $out.Flush()
+}
+
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Media, ContentType = WindowsRuntime]
@@ -63,4 +73,4 @@ foreach ($line in $result.Lines) {
     width = [int]$decoder.PixelWidth
     height = [int]$decoder.PixelHeight
     lines = $lines
-} | ConvertTo-Json -Depth 6 -Compress
+} | ConvertTo-Json -Depth 6 -Compress | ForEach-Object { Write-Utf8Stdout $_ }
