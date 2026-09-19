@@ -94,9 +94,13 @@ tests/            14 testes, rodam offline
 
 ## Voz (pt-BR)
 
-```powershell
-pip install winrt-runtime winrt-Windows.Media.SpeechRecognition winrt-Windows.Globalization
+O lançador cria o venv do projeto e instala as dependências na primeira
+execução. Não use `pip install` no Python do sistema: esta máquina tem mais de
+um Python no PATH (`C:\Python314` e `...\Local\Python\pythoncore-3.14-64`) e
+qual deles responde por `python` muda conforme o shell — instalar num e rodar
+no outro dá `ModuleNotFoundError: No module named 'winrt'`.
 
+```powershell
 .\scriptsoz.ps1                       # qBittorrent, dry-run (não clica)
 .\scriptsoz.ps1 -App Discord
 .\scriptsoz.ps1 -Texto                # digitado, para desenvolver

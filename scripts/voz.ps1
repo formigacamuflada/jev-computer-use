@@ -35,6 +35,22 @@ if ($LASTEXITCODE -ne 0) {
     Start-Sleep -Seconds 2
 }
 
+# --- interpretador ---
+# Esta maquina tem mais de um Python no PATH, e qual deles responde por
+# "python" muda conforme o shell. O venv do projeto remove a ambiguidade:
+# as dependencias ficam onde o lancador sabe procurar.
+$py = Join-Path $raiz ".venv\Scripts\python.exe"
+if (-not (Test-Path $py)) {
+    Write-Host "criando o venv do projeto (primeira vez)..." -ForegroundColor Yellow
+    $base = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $base) { Write-Host "python nao encontrado no PATH." -ForegroundColor Red; exit 1 }
+    & $base -m venv (Join-Path $raiz ".venv")
+    & $py -m pip install --quiet --only-binary=:all: `
+        winrt-runtime "winrt-Windows.Media.SpeechRecognition" `
+        "winrt-Windows.Globalization" "winrt-Windows.Foundation" `
+        "winrt-Windows.Foundation.Collections"
+}
+
 $env:PYTHONPATH = Join-Path $raiz "src"
 $env:JEVCU_DRIVER_BIN = $bin
 
@@ -51,4 +67,4 @@ Write-Host ("alvo: {0} | voz: {1}" -f $App, $(if ($Texto) { "texto" } else { "pt
 Write-Host ""
 
 Push-Location $raiz
-try { & python @argumentos } finally { Pop-Location }
+try { & $py @argumentos } finally { Pop-Location }
