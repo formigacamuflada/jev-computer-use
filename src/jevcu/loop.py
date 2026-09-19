@@ -24,7 +24,12 @@ from .contracts import ABSTAIN, REOBSERVE, Candidate, Choice, DecisionError, val
 from .driver import Driver, DriverError, Observation
 from .jev import Chooser
 
-Outcome = Literal["done", "abstained", "exhausted", "escalate", "error"]
+# "unverified": a acao foi enviada, mas nada mudou na tela. O Driver
+# responde `effect: "unverifiable"` -- ele nao promete sucesso -- e
+# anunciar "done" nesse caso e relatar exito que nao houve.
+Outcome = Literal[
+    "done", "unverified", "abstained", "exhausted", "escalate", "error"
+]
 
 
 @dataclass
@@ -206,13 +211,33 @@ class Agent:
                 return Run(goal, "error", steps, f"falha ao executar: {exc}")
             execute_ms = (time.perf_counter() - marca) * 1000
 
-            steps.append(Step(index, observation, choice, candidate, True, "",
+            # (8) verificacao da pos-condicao -- de verdade, nao como comentario.
+            #
+            # O Driver responde `effect: "unverifiable"`: ele entregou a acao
+            # mas nao afirma que surtiu efeito. Anunciar "done" em cima disso
+            # e inventar um exito. Numa sessao real, seis cliques foram
+            # relatados como feitos sem nada ter acontecido na tela.
+            antes = observation.signature()
+            verificado = False
+            nota = ""
+            try:
+                depois = self._driver.observe(app).signature()
+                verificado = depois != antes
+                if not verificado:
+                    nota = "a tela nao mudou apos a acao"
+            except DriverError as exc:
+                nota = f"nao consegui reobservar para verificar: {exc}"
+
+            steps.append(Step(index, observation, choice, candidate, True, nota,
                               observe_ms, decide_ms, execute_ms))
             history.append(_history_entry(candidate, choice, executed=True))
-            self._emit("acted", candidate.description)
 
-            # (8) a verificacao da pos-condicao acontece na proxima observacao
-            return Run(goal, "done", steps, candidate.description)
+            if verificado:
+                self._emit("acted", candidate.description)
+                return Run(goal, "done", steps, candidate.description)
+
+            self._emit("unverified", f"{candidate.description} ({nota})")
+            return Run(goal, "unverified", steps, f"{candidate.description} -- {nota}")
 
         return Run(goal, "exhausted", steps, f"limite de {self._config.max_steps} passos")
 

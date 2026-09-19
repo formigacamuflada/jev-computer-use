@@ -93,13 +93,39 @@ def test_resposta_com_id_invalido_e_rejeitada():
 
 # --- loop ---
 
-def test_loop_executa_uma_acao_e_registra():
-    driver = MockDriver([_observation()])
+def _observation_depois() -> Observation:
+    """Tela apos a acao: precisa diferir, senao nao ha o que verificar."""
+    return Observation(
+        snapshot_id="s2",
+        app="Bloco de Notas",
+        window_title="Salvo",
+        elements=[Element("e1", "Button", "Fechar")],
+    )
+
+
+def test_loop_executa_e_verifica_a_pos_condicao():
+    # Primeira observacao decide; a segunda verifica. Como a tela muda,
+    # o desfecho e "done".
+    driver = MockDriver([_observation(), _observation_depois()])
     agent = Agent(driver, mock_chooser, Config(act_threshold=0.0))
     run = agent.run("clicar em Salvar")
     assert run.outcome == "done"
     assert run.actions_taken == 1
     assert driver.executed[0][0] == "click"
+
+
+def test_acao_sem_efeito_na_tela_nao_vira_done():
+    """Regressao: o Driver responde `effect: "unverifiable"` e nao promete
+    sucesso. Numa sessao real, seis cliques viraram "done" sem nada acontecer.
+
+    Com a tela identica antes e depois, o desfecho tem que ser honesto.
+    """
+    driver = MockDriver([_observation()])      # sempre a mesma tela
+    agent = Agent(driver, mock_chooser, Config(act_threshold=0.0))
+    run = agent.run("clicar em Salvar")
+    assert run.outcome == "unverified"
+    assert run.actions_taken == 1              # a acao foi enviada
+    assert "nao mudou" in run.message
 
 
 def test_dry_run_nao_executa_nada():
@@ -136,3 +162,28 @@ def test_must_include_inexistente_nao_quebra():
     observation = Observation("s1", "App", "j", [Element("e1", "Button", "Salvar")])
     candidates = build_candidates(observation, must_include="Nao Existe")
     assert any(c.tool == "click" for c in candidates)
+
+
+# --- recusa do Driver em suas tres formas -------------------------------
+
+def test_recusa_em_qualquer_das_tres_formas_levanta():
+    """As tres apareceram em uso real. Checar so uma deixa recusa virar exito."""
+    from jevcu.driver import DriverError, raise_if_refused
+
+    formas = [
+        {"structuredContent": {"status": "refused",
+                               "refusal": {"code": "window_minimized", "message": "x"}}},
+        {"structuredContent": {"status": "refused", "code": "snapshot_id_required"}},
+        {"structuredContent": {"effect": "refused", "route": None}},
+    ]
+    for payload in formas:
+        with pytest.raises(DriverError):
+            raise_if_refused("click", payload)
+
+
+def test_sucesso_normal_nao_levanta():
+    from jevcu.driver import raise_if_refused
+
+    raise_if_refused("click", {"structuredContent": {
+        "effect": "unverifiable", "route": "accessibility",
+    }})

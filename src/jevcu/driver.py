@@ -63,6 +63,18 @@ class Observation:
     pid: int | None = None
     window_id: int | None = None
 
+    def signature(self) -> tuple:
+        """Resumo comparavel da tela, para detectar se uma acao teve efeito.
+
+        Nao e perfeito -- ha acoes legitimas que nao mudam nada visivel -- mas
+        e honesto: sem diferenca nenhuma, nao da para afirmar que funcionou.
+        """
+        return (
+            self.window_title,
+            len(self.elements),
+            tuple(sorted((e.name, e.role) for e in self.elements if e.name)),
+        )
+
     def compact(self, limit: int = 40, *, budget_tokens: int = 6000) -> dict[str, Any]:
         """Forma que vai no state do Jev.
 
@@ -116,7 +128,14 @@ def raise_if_refused(tool: str, result: dict[str, Any]) -> None:
     if not isinstance(content, dict):
         return
     recusa = content.get("refusal")
-    if not isinstance(recusa, dict) and content.get("status") != "refused":
+    # Tres formas da mesma recusa, e ja vi as tres na pratica: o objeto
+    # `refusal`, o `status`, e -- sozinho, sem os outros dois -- o `effect`.
+    # Checar so uma delas deixa recusa passar por sucesso.
+    if (
+        not isinstance(recusa, dict)
+        and content.get("status") != "refused"
+        and content.get("effect") != "refused"
+    ):
         return
     recusa = recusa if isinstance(recusa, dict) else {}
     codigo = recusa.get("code") or content.get("code") or "refused"

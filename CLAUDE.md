@@ -50,13 +50,22 @@ mesma pergunta feita duas vezes.** O Jev não responde 50/50 a um empate exato
 — desempata pela primeira chave e ainda relata confiança alta. O loop lia isso
 como certeza. Hoje `build_candidates` descarta descrição repetida.
 
+Uma sexta, e a mais cara de todas: **anunciar `done` sem verificar.** O passo
+8 do SKILL.md — reobservar e conferir a pós-condição — existia só como
+comentário no `loop.py`, e a linha seguinte retornava `done`. O Driver responde
+`effect: "unverifiable"`: ele entrega a ação e **não promete** que surtiu
+efeito. Numa sessão em `-Executar`, o usuário viu que só três de treze cliques
+aconteceram de verdade — o resto foi relatado como `done`. Hoje o loop
+reobserva, compara `Observation.signature()` e devolve o desfecho
+`unverified` quando a tela não mudou.
+
 Uma quinta, de outra natureza: **tratar recusa como sucesso.** O Cua Driver
 recusa uma ação sem marcar `isError` — a recusa vem em
-`structuredContent.status == "refused"` com um objeto `refusal`. Lendo só o
-`isError`, uma sessão inteira anunciou `[acted]` e `done` para seis cliques que
-o Driver nunca executou. Falha que se parece com êxito é a pior de todas: sem a
-mensagem da recusa não havia nem diagnóstico. Hoje `raise_if_refused` sobe a
-mensagem inteira.
+`structuredContent` em **três formas diferentes**, todas já vistas: o objeto
+`refusal`, o `status == "refused"`, e — sozinho, sem os outros dois — o
+`effect == "refused"`. Checar só uma delas deixa recusa passar por sucesso.
+Hoje `raise_if_refused` cobre as três e sobe a mensagem inteira, que é o
+diagnóstico.
 
 Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord para
 256 tokens de um orçamento de 6000 — isso é perda de informação, não economia.
@@ -84,6 +93,17 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
   é `snapshot:índice` e carrega os dois. Índice sozinho é recusado com
   `snapshot_id_required`; com índice é obrigatório mandar o `snapshot_id`
   junto. Vale igual para `click` e `type_text`.
+- **`effect: "unverifiable"` é a resposta normal de um clique bem-sucedido.**
+  Não é erro nem promessa: o Driver entregou pela rota de acessibilidade e não
+  sabe dizer se o app reagiu. Só a reobservação responde isso.
+- **Clique em app Qt costuma não fazer nada.** Medido no qBittorrent: `Button`
+  com `invoke` funciona; `MenuItem` (precisa de `expand`) e `TreeItem`/
+  `ListItem` (precisam de `select`) recebem o invoke e ignoram. O campo
+  `actions` de cada elemento diz o que ele aceita, e o projeto **ainda não usa
+  esse campo** — é a próxima correção óbvia.
+- **`delivery_mode: "foreground"` é recusado** quando o elemento está fora da
+  área visível: *"resolves to (0,0) but is not visibly actionable"*. A saída
+  que o Driver sugere é aumentar a janela ou rolar a região até o elemento.
 - **Janela minimizada não aceita clique.** O Driver recusa com
   `window_minimized` e diz o que fazer: `bring_to_front` e re-observar. O
   projeto não faz isso sozinho — roubaria o foco, que é justamente o que o
