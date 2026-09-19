@@ -268,8 +268,25 @@ do PowerShell para `IVector<T>`, não do motor.
 
 ```powershell
 irm https://cua.ai/driver/install.ps1 | iex
-cua-driver autostart kick      # sobe o daemon sem precisar relogar
 ```
+
+**Depois de reiniciar o PC**, o `voz.ps1` sobe o daemon sozinho. Para subir na
+mão:
+
+```powershell
+Start-Process cua-driver -ArgumentList serve -WindowStyle Hidden
+cua-driver status
+```
+
+`cua-driver autostart kick` só funciona se o autostart estiver registrado —
+ele manda o Agendador de Tarefas rodar a tarefa. Com o autostart desativado
+(recomendado, veja abaixo) o kick falha com "o sistema não pode encontrar o
+arquivo especificado", e o caminho é `serve` direto.
+
+Uma consequência de desativar o autostart: o daemon iniciado de um shell comum
+roda em integridade média e **não consegue automatizar janelas elevadas**
+(instaladores, Gerenciador de Tarefas, apps abertos como administrador). Para
+esses, suba o daemon de um PowerShell como administrador.
 
 ```bash
 set PYTHONPATH=src

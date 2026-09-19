@@ -33,11 +33,37 @@ if (-not $bin) {
 }
 
 # --- daemon ---
-& $bin status *>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "subindo o daemon..." -ForegroundColor Yellow
-    & $bin autostart kick *>$null
-    Start-Sleep -Seconds 2
+# Com ErrorActionPreference = Stop, um executavel que escreve em stderr vira
+# erro fatal no PowerShell 5.1. O `status` escreve "daemon is not running" em
+# stderr, entao a propria verificacao matava o script antes de ele tentar subir
+# o daemon. Por isso o bloco roda com a preferencia relaxada.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & $bin status *>$null
+    $rodando = ($LASTEXITCODE -eq 0)
+
+    if (-not $rodando) {
+        Write-Host "daemon parado; subindo..." -ForegroundColor Yellow
+        # `autostart kick` roda a tarefa agendada, que so existe se o autostart
+        # estiver registrado. Com ele desativado, o kick falha com "o sistema
+        # nao pode encontrar o arquivo especificado". Subir com `serve` direto
+        # funciona nos dois casos.
+        Start-Process -FilePath $bin -ArgumentList "serve" -WindowStyle Hidden
+        foreach ($tentativa in 1..12) {
+            Start-Sleep -Milliseconds 700
+            & $bin status *>$null
+            if ($LASTEXITCODE -eq 0) { $rodando = $true; break }
+        }
+    }
+}
+finally { $ErrorActionPreference = $prevEAP }
+
+if (-not $rodando) {
+    Write-Host "nao consegui subir o Cua Driver." -ForegroundColor Red
+    Write-Host "Tente manualmente:  cua-driver autostart kick"
+    Write-Host "Se persistir:       cua-driver doctor"
+    exit 1
 }
 
 # --- interpretador ---
