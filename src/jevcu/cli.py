@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Ctrl+C ou linha vazia para sair.")
     print()
 
+    falhas = 0
     while True:
         phrases = None
         rotulos: list[str] = []
@@ -115,11 +116,24 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             falado = listener.listen(phrases)
+            falhas = 0
         except KeyboardInterrupt:
             break
-        except (RuntimeError, ValueError) as exc:
-            print(f"erro no reconhecimento: {exc}")
+        except ValueError as exc:
+            print(f"erro de uso: {exc}")
             break
+        except RuntimeError as exc:
+            # Falha do motor nao derruba a sessao: ele ja tentou de novo
+            # internamente, entao aqui so desiste se for persistente.
+            falhas += 1
+            print(f"[falha {falhas}/3] {exc}")
+            if falhas >= 3:
+                print("\nO motor de fala falhou tres vezes seguidas.")
+                print("Confira o microfone padrao em Configuracoes > Sistema > Som > Entrada.")
+                print("Se 'Mixagem estereo' estiver como padrao, troque para o microfone real.")
+                print(r"Alternativa: .\scripts\voz.ps1 -Texto")
+                break
+            continue
 
         if not falado:
             if por_voz:

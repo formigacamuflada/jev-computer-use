@@ -18,6 +18,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
+# 0x800455A0: o motor entrou em estado ruim, nao e pedido invalido.
+_INTERNAL_SPEECH_ERROR = -2147199584
+
 
 class Listener(Protocol):
     def listen(self, phrases: list[str] | None = None) -> str | None: ...
@@ -65,6 +68,7 @@ class WinRtListener:
         self._recognizer = None
         self._compiled: tuple[str, ...] | None = None
         self._loop = None
+        self._stage = "ocioso"
 
     # -- ciclo de vida -----------------------------------------------------
 
@@ -118,10 +122,12 @@ class WinRtListener:
         # Fecha antes de abrir: dois recognizers vivos = Internal Speech Error.
         self._dispose()
 
+        self._stage = "criando o recognizer"
         recognizer = SpeechRecognizer(Language(self._language))
         recognizer.timeouts.initial_silence_timeout = timedelta(seconds=self._timeout_s)
         recognizer.constraints.append(SpeechRecognitionListConstraint(phrases))
 
+        self._stage = "compilando a gramatica"
         result = await recognizer.compile_constraints_async()
         if result.status != SpeechRecognitionResultStatus.SUCCESS:
             try:
@@ -135,20 +141,36 @@ class WinRtListener:
         return recognizer
 
     def listen(self, phrases: list[str] | None = None) -> str | None:
+        """Escuta uma vez. Erro interno do motor gera UMA nova tentativa limpa.
+
+        0x800455A0 costuma significar que o motor ficou em estado ruim, nao que
+        o pedido era invalido. Descartar e refazer resolve na maioria das vezes;
+        se falhar de novo, o problema e do ambiente e o erro sobe com o estagio
+        em que aconteceu.
+        """
         if not phrases:
             raise ValueError("o backend winrt precisa de um vocabulario fechado")
-        try:
-            return self._get_loop().run_until_complete(self._listen(phrases))
-        except OSError as exc:
-            # O motor pode ficar em estado ruim; descartar forca reconstrucao
-            # limpa na proxima escuta em vez de repetir o erro para sempre.
-            self._dispose()
-            raise RuntimeError(f"motor de fala falhou: {exc}") from None
+
+        for tentativa in (1, 2):
+            self._stage = "preparando"
+            try:
+                return self._get_loop().run_until_complete(self._listen(phrases))
+            except OSError as exc:
+                codigo = getattr(exc, "winerror", None)
+                self._dispose()
+                if tentativa == 1 and codigo == _INTERNAL_SPEECH_ERROR:
+                    continue
+                raise RuntimeError(
+                    f"motor de fala falhou em '{self._stage}' "
+                    f"(WinError {codigo}): {exc}"
+                ) from None
+        return None
 
     async def _listen(self, phrases: list[str]) -> str | None:
         from winrt.windows.media.speechrecognition import SpeechRecognitionResultStatus
 
         recognizer = await self._ensure(phrases)
+        self._stage = "capturando audio"
         result = await recognizer.recognize_async()
         if result.status != SpeechRecognitionResultStatus.SUCCESS:
             return None
