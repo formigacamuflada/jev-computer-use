@@ -170,22 +170,26 @@ def main(argv: list[str] | None = None) -> int:
 
         # Traduz o falado para o rotulo exato da tela, que e o que as
         # descricoes dos candidatos usam.
-        goal = falado
-        if rotulos:
-            alvo = casar(falado, rotulos)
-            if alvo is None:
-                # Transcricao que nao casa com nada na tela nao vira decisao.
-                # Sem isto, ruido como "selecioni com o ejo" chega ao decisor
-                # e pode virar um clique: em modo real, um clique errado.
-                print("[nao entendi] nenhum elemento da tela corresponde")
-                speaker.say("Nao entendi.")
-                continue
-            goal = f"clicar em {alvo}"
+        # O casamento e DICA, nao portao. Quando acerta um rotulo, reservamos
+        # a vaga dele na tabela. Quando nao acerta, o pedido segue cru para o
+        # decisor: "quero ver o que ja terminou de baixar" nao casa com
+        # "Completado" por texto nenhum, mas o Jev resolve a intencao.
+        alvo = casar(falado, rotulos) if rotulos else None
+        if alvo:
             print(f"[alvo] {alvo!r}")
-            handle(goal, must_include=alvo)
+            handle(f"clicar em {alvo}", must_include=alvo)
             continue
 
-        handle(goal)
+        if args.decide == "mock":
+            # O mock nao e calibrado: ele sempre escolhe alguma coisa, entao
+            # ruido viraria acao. So o decisor com confianca calibrada pode
+            # receber texto que nao casou com nada.
+            print("[nao entendi] nenhum elemento corresponde (use --decide live)")
+            speaker.say("Nao entendi.")
+            continue
+
+        print("[intencao] sem rotulo obvio; deixando o Jev decidir")
+        handle(falado)
     return 0
 
 
