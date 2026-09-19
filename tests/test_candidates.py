@@ -1,7 +1,8 @@
 """Regressoes da tabela de candidatos e da regua de confianca.
 
-Os dois casos aqui vieram da leitura do tiptour-macos, que resolve o mesmo
-problema no macOS: descricao repetida e confianca medida com duas reguas.
+Os tres casos aqui vieram da leitura do tiptour-macos, que resolve o mesmo
+problema no macOS: descricao repetida, confianca medida com duas reguas, e
+tela sem arvore de acessibilidade.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from jevcu.candidates import build_candidates
-from jevcu.contracts import margin_confidence
+from jevcu.contracts import DecisionError, margin_confidence, validate_choice
 from jevcu.driver import Element, Observation
 from jevcu.jev import mock_chooser, parse_response
 
@@ -114,3 +115,46 @@ def test_sem_probabilidades_usa_o_numero_do_provider():
         "choice": "click-e1", "probabilities": {}, "confidence": 0.77,
     }}}
     assert parse_response(payload, candidates).confidence == pytest.approx(0.77)
+
+
+# --- OCR: telas sem arvore de acessibilidade ---
+
+def _ocr_observation(capture_id: str | None = "cap_1") -> Observation:
+    return _observation(
+        [Element("ocr0", "Text", "Baixar", bounds=(100, 40, 60, 20), source="ocr")],
+        capture_id=capture_id,
+    )
+
+
+def test_texto_lido_por_ocr_vira_clique_por_pixel():
+    """Apps UWP devolvem a arvore vazia. Sem isto a tela inteira ficava fora
+    de alcance: sem elemento, nao ha candidato."""
+    candidates = [c for c in build_candidates(_ocr_observation()) if c.tool]
+    assert len(candidates) == 1
+    alvo = candidates[0]
+    assert alvo.arguments["x"] == 130 and alvo.arguments["y"] == 50
+    # background primeiro: e o modo em que o Driver faz hit-test de UIA no
+    # ponto antes de recorrer ao PostMessage.
+    assert alvo.arguments["delivery_mode"] == "background"
+    assert "OCR" in alvo.description
+
+
+def test_clique_por_pixel_morre_com_a_captura():
+    candidates = build_candidates(_ocr_observation("cap_1"))
+    with pytest.raises(DecisionError, match="obsoleta"):
+        validate_choice("click-ocr0", candidates, current_capture_id="cap_2")
+
+
+def test_texto_sem_caixa_nao_vira_candidato():
+    observation = _observation(
+        [Element("ocr0", "Text", "Baixar", source="ocr")], capture_id="cap_1"
+    )
+    assert not [c for c in build_candidates(observation) if c.tool]
+
+
+def test_o_jev_sabe_que_a_evidencia_veio_de_ocr():
+    """Um rotulo de OCR pode ser um titulo, uma legenda ou um erro de leitura.
+    Esconder a origem faria o Jev tratar os dois tipos como iguais."""
+    compacta = _ocr_observation().compact()
+    assert compacta["elements"][0]["source"] == "ocr"
+    assert "source" not in Element("e1", "Button", "Salvar").compact()

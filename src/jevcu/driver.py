@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from .tree import Node, fit, interactive_nodes
@@ -32,12 +34,19 @@ class Element:
     # Identificadores do Cua Driver. Valem so para o snapshot que os produziu.
     index: int | None = None
     token: str | None = None
+    # De onde veio a evidencia: "uia" (arvore de acessibilidade) ou "ocr"
+    # (texto lido da imagem). O Jev precisa saber: um rotulo de OCR pode ser
+    # um titulo, uma legenda ou um erro de leitura, nao necessariamente algo
+    # clicavel, e a decisao muda quando ele sabe disso.
+    source: str = "uia"
 
     def compact(self) -> dict[str, Any]:
         """Forma enxuta que vai para o Jev. Sem coordenada: ele nao precisa."""
         item: dict[str, Any] = {"ref": self.ref, "role": self.role, "name": self.name}
         if not self.enabled:
             item["enabled"] = False
+        if self.source != "uia":
+            item["source"] = self.source
         return item
 
 
@@ -134,6 +143,8 @@ class CuaDriver:
         *,
         timeout: float = 60.0,
         max_elements: int = 1500,
+        ocr_when_below: int = 3,
+        ocr_language: str = "pt-BR",
     ) -> None:
         resolved = shutil.which(binary) or (binary if "/" in binary or "\\" in binary else None)
         if resolved is None:
@@ -144,6 +155,12 @@ class CuaDriver:
         self._binary = resolved
         self._timeout = timeout
         self._max_elements = max_elements
+        # Abaixo de quantos elementos da arvore vale gastar uma captura e um
+        # OCR. Zero desliga. O gatilho e a arvore vazia, nao a arvore pequena:
+        # com UIA funcionando o OCR so acrescenta ruido e custo.
+        self._ocr_when_below = ocr_when_below
+        self._ocr_language = ocr_language
+        self._capture_counter = 0
 
     def call(self, tool: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = json.dumps(arguments or {}, ensure_ascii=False)
@@ -214,16 +231,79 @@ class CuaDriver:
             for raw in raw_elements
         ]
         window_title = str(content.get("window_title") or "")
+        tree = build_tree(raw_elements, window_title=window_title) if raw_elements else None
+        capture_id: str | None = None
+
+        # Apps UWP e WinUI3 devolvem a arvore vazia. Ate aqui isso era um beco
+        # sem saida: sem elemento nao ha candidato, e a tela inteira ficava
+        # fora de alcance. Ler o texto da imagem devolve alvos -- fracos, mas
+        # reais -- e o clique por pixel do Driver faz um hit-test de UIA no
+        # ponto antes de recorrer ao PostMessage, entao ele costuma acertar o
+        # controle que a caminhada da arvore nao enxergou.
+        if self._ocr_when_below > 0 and len(elements) < self._ocr_when_below:
+            lidos, capture_id = self._read_by_ocr(pid, window_id)
+            elements.extend(lidos)
 
         return Observation(
             snapshot_id=str(content.get("snapshot_id") or "s0"),
             app=str(content.get("app_name") or "desconhecido"),
             window_title=window_title,
             elements=elements,
-            tree=build_tree(raw_elements, window_title=window_title) if raw_elements else None,
+            capture_id=capture_id,
+            tree=tree,
             pid=pid,
             window_id=window_id,
         )
+
+    def _read_by_ocr(
+        self, pid: int | None, window_id: int | None
+    ) -> tuple[list[Element], str | None]:
+        """Captura a janela e le o texto dela. Nunca levanta excecao.
+
+        Este e o caminho de ultimo recurso: se falhar, o resultado correto e
+        uma observacao sem elementos -- que o loop ja sabe tratar -- e nao uma
+        sessao derrubada.
+
+        As coordenadas saem em pixels do PNG, que e exatamente o sistema que o
+        `click` por x/y espera. Por isso o OCR roda sobre o arquivo que o
+        proprio Driver escreveu, nunca sobre uma captura feita por fora.
+        """
+        from .ocr import OcrError, read_image
+
+        self._capture_counter += 1
+        capture_id = f"cap_{pid}_{self._capture_counter}"
+        with tempfile.TemporaryDirectory(prefix="jevcu-ocr-") as pasta:
+            destino = Path(pasta) / "janela.png"
+            try:
+                self.call("get_window_state", {
+                    "pid": pid,
+                    "window_id": window_id,
+                    # So a imagem: a arvore ja veio vazia na chamada anterior e
+                    # caminha-la de novo seria pagar duas vezes por nada.
+                    "include_accessibility_tree": False,
+                    "include_screenshot": True,
+                    "screenshot_out_file": str(destino),
+                })
+                if not destino.exists():
+                    return [], None
+                linhas = read_image(destino, language=self._ocr_language)
+            except (DriverError, OcrError, OSError, subprocess.TimeoutExpired):
+                return [], None
+
+        elements: list[Element] = []
+        for indice, linha in enumerate(linhas):
+            texto = linha.text.strip()
+            bounds = linha.bounds
+            if not texto or bounds is None or not any(ch.isalnum() for ch in texto):
+                continue
+            elements.append(Element(
+                ref=f"ocr{indice}",
+                role="Text",
+                name=texto,
+                bounds=bounds,
+                source="ocr",
+            ))
+        return elements, (capture_id if elements else None)
 
     def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.call(tool, arguments)

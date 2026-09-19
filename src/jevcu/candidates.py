@@ -97,6 +97,9 @@ def _candidate_for(
     observation: Observation,
     text_to_type: str | None,
 ) -> Candidate | None:
+    if element.source == "ocr":
+        return _ocr_candidate(element, observation)
+
     target = _target_args(element, observation)
 
     if element.role in CLICKABLE:
@@ -118,6 +121,37 @@ def _candidate_for(
         )
 
     return None
+
+
+def _ocr_candidate(element: Element, observation: Observation) -> Candidate | None:
+    """Clique por pixel no centro de um texto lido da imagem.
+
+    So existe quando a arvore de acessibilidade nao devolveu nada. A descricao
+    diz de onde veio a evidencia porque o Jev precisa poder desconfiar dela:
+    um texto lido da tela pode ser um titulo, uma legenda ou um erro de
+    leitura, e nao so um botao.
+
+    O candidato fica preso ao `capture_id`. Uma coordenada so vale para a
+    captura que a produziu -- se a tela mudou entre observar e agir, o clique
+    cai em outro lugar. A `validate_choice` rejeita isso antes de executar.
+    """
+    if element.bounds is None or observation.pid is None:
+        return None
+    left, top, width, height = element.bounds
+    return Candidate(
+        id=f"click-{element.ref}",
+        description=f"Clicar no texto \"{element.name}\", lido da imagem por OCR.",
+        tool="click",
+        arguments={
+            "pid": observation.pid,
+            "x": left + width // 2,
+            "y": top + height // 2,
+            # O Driver faz hit-test de UIA no ponto antes de cair no
+            # PostMessage -- e o que faz um clique por pixel funcionar em UWP.
+            "delivery_mode": "background",
+        },
+        capture_id=observation.capture_id,
+    )
 
 
 def describe_table(candidates: list[Candidate]) -> str:

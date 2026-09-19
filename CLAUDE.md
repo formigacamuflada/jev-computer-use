@@ -67,7 +67,16 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
 - **CUDA não funciona aqui**: falta `cublas64_12.dll`. Detectar isso custa
   109 ms; tentar construir na GPU custa 23 s antes de falhar. CPU int8
   transcreve 3 s de áudio em ~145 ms — a GPU não faria diferença.
-- **Apps UWP devolvem 0 elementos**, inclusive pelo Cua Driver. Sem solução.
+- **Apps UWP devolvem 0 elementos** pela árvore de acessibilidade, inclusive
+  pelo Cua Driver. O contorno é o OCR: medido nas Configurações do Windows,
+  0 elementos viram 52 linhas de texto e 24 candidatos clicáveis, com acentos
+  corretos. O clique é por pixel, e funciona porque o `click` do Driver em
+  `delivery_mode: background` faz hit-test de UIA no ponto antes de recorrer
+  ao PostMessage — ele acha o controle que a caminhada da árvore não enxergou.
+- **Custo de uma observação com OCR** (janela 1200x932): `list_windows` 2,0 s,
+  caminhada da árvore 4,0 s, captura 2,2 s, OCR 0,65 s. O OCR é a etapa mais
+  barata. A cara é a árvore que devolve zero em UWP — pular essa caminhada
+  quando o app é UWP é a otimização óbvia e ainda não foi feita.
 - **Backend `winrt` de voz**: funciona isolado, falha na sessão do usuário com
   `0x800455A0`. Nunca reproduzido. Use `whisper`.
 - **A rede do usuário é instável.** Timeouts do Jev são comuns; o cliente já
@@ -79,6 +88,7 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
 src/jevcu/
   contracts.py    Candidate, Choice, Usage, validate_choice (falha fechado)
   candidates.py   tabela a partir da observação; `must_include` reserva o alvo
+  ocr.py          OCR nativo do Windows; é o que salva as telas UWP
   jev.py          cliente HTTP; backends mock e live; mede latência e tokens
   driver.py       CuaDriver (age), UiaDriver (só lê), MockDriver (testes)
   loop.py         os 8 passos do SKILL.md; tempo por etapa
