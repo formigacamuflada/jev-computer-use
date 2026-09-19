@@ -156,6 +156,17 @@ de esperar um tempo fixo. As frases da tela entram como `initial_prompt`, o que
 enviesa a transcrição rumo aos termos visíveis sem restringi-la — o mesmo
 vocabulário serve aos dois backends, de formas diferentes.
 
+Verificado nesta máquina:
+
+```
+modelo tiny pronto em 0.8 s   backend cuda/float16 (RTX 3060 Ti)
+gravação de 3 s sem fala  ->  None, como esperado
+```
+
+O `small` (~480 MB) não terminou de baixar aqui — a rede oscilou e parou em
+131 MB. O `tiny` (~75 MB) basta para validar o caminho; troque depois com
+`-Modelo small` para mais precisão.
+
 Escolher o microfone explicitamente também é uma vantagem: o `winrt` depende do
 padrão do sistema, aqui o dispositivo é um parâmetro.
 
