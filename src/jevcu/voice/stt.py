@@ -40,9 +40,15 @@ class TextListener:
 class WinRtListener:
     """Reconhecimento nativo do Windows, offline, com vocabulario fechado.
 
-    A gramatica e recompilada quando o conjunto de frases muda -- normalmente
-    a cada tela nova. Compilar custa tempo, entao o conjunto anterior fica em
-    cache e so recompila de fato quando ha diferenca.
+    Dois cuidados que o motor de fala cobra caro:
+
+    O recognizer antigo PRECISA ser fechado antes de criar outro. Ele segura o
+    dispositivo de captura, e um segundo com o primeiro vivo falha com
+    0x800455A0 "Internal Speech Error". Isso aparece quando o vocabulario muda
+    entre uma escuta e outra, que e o caso normal ao trocar de tela.
+
+    O event loop e um so para toda a sessao. Um `asyncio.run` por escuta deixa
+    o recognizer preso a um loop ja fechado na chamada seguinte.
     """
 
     def __init__(self, language: str = "pt-BR", timeout_s: float = 8.0) -> None:
@@ -58,6 +64,42 @@ class WinRtListener:
         self._timeout_s = timeout_s
         self._recognizer = None
         self._compiled: tuple[str, ...] | None = None
+        self._loop = None
+
+    # -- ciclo de vida -----------------------------------------------------
+
+    def _get_loop(self):
+        import asyncio
+
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop
+
+    def _dispose(self) -> None:
+        """Libera o recognizer atual e, com ele, o microfone."""
+        if self._recognizer is None:
+            return
+        try:
+            self._recognizer.close()
+        except Exception:
+            # Ja fechado ou em estado ruim: seguir e soltar a referencia.
+            pass
+        self._recognizer = None
+        self._compiled = None
+
+    def close(self) -> None:
+        self._dispose()
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.close()
+        self._loop = None
+
+    def __enter__(self) -> "WinRtListener":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    # -- reconhecimento ----------------------------------------------------
 
     async def _ensure(self, phrases: list[str]):
         from datetime import timedelta
@@ -73,12 +115,19 @@ class WinRtListener:
         if self._recognizer is not None and self._compiled == key:
             return self._recognizer
 
+        # Fecha antes de abrir: dois recognizers vivos = Internal Speech Error.
+        self._dispose()
+
         recognizer = SpeechRecognizer(Language(self._language))
         recognizer.timeouts.initial_silence_timeout = timedelta(seconds=self._timeout_s)
         recognizer.constraints.append(SpeechRecognitionListConstraint(phrases))
 
         result = await recognizer.compile_constraints_async()
         if result.status != SpeechRecognitionResultStatus.SUCCESS:
+            try:
+                recognizer.close()
+            except Exception:
+                pass
             raise RuntimeError(f"gramatica nao compilou: {result.status!r}")
 
         self._recognizer = recognizer
@@ -86,11 +135,15 @@ class WinRtListener:
         return recognizer
 
     def listen(self, phrases: list[str] | None = None) -> str | None:
-        import asyncio
-
         if not phrases:
             raise ValueError("o backend winrt precisa de um vocabulario fechado")
-        return asyncio.run(self._listen(phrases))
+        try:
+            return self._get_loop().run_until_complete(self._listen(phrases))
+        except OSError as exc:
+            # O motor pode ficar em estado ruim; descartar forca reconstrucao
+            # limpa na proxima escuta em vez de repetir o erro para sempre.
+            self._dispose()
+            raise RuntimeError(f"motor de fala falhou: {exc}") from None
 
     async def _listen(self, phrases: list[str]) -> str | None:
         from winrt.windows.media.speechrecognition import SpeechRecognitionResultStatus

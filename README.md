@@ -132,6 +132,22 @@ rótulo `"Baixando (0)"`.
 | Casamento fala → rótulo | ✅ coberto por teste |
 | **Reconhecer voz humana** | ⬜ **não testado — exige alguém falando** |
 
+### Armadilhas do motor de fala
+
+**Feche o recognizer antes de criar outro.** Ele segura o dispositivo de
+captura; um segundo com o primeiro vivo falha com `0x800455A0 Internal Speech
+Error`. Isso acontece sempre que o vocabulário muda entre uma escuta e outra —
+ou seja, o tempo todo.
+
+**Um event loop para a sessão inteira.** `asyncio.run` por escuta deixa o
+recognizer preso a um loop já fechado na chamada seguinte.
+
+**Contadores na UI envenenam a gramática.** O qBittorrent mostra
+`"Semeando (12)"` e o número muda a cada segundo. Se entrar no vocabulário,
+cada observação gera uma gramática diferente, o recognizer é recriado sem
+parar e o motor quebra. `normalizar()` remove contadores entre parênteses —
+o que também deixa a frase mais natural, já que ninguém fala "semeando doze".
+
 ### Notas de plataforma
 
 `winsdk` **não serve**: sem wheel para Python 3.14 e exige Visual Studio para

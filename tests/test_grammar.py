@@ -8,9 +8,25 @@ from jevcu.voice.grammar import COMANDOS_FIXOS, casar, frases_para, normalizar
 # --- normalizacao ---
 
 def test_remove_pontuacao_que_ninguem_fala():
-    # "Semeando (12)" nao se fala "abre parenteses doze".
-    assert normalizar("Semeando (12)") == "semeando 12"
     assert normalizar("Arquivo...") == "arquivo"
+    assert normalizar("Salvar &como") == "salvar como"
+
+
+def test_contador_entre_parenteses_sai_do_vocabulario():
+    """Regressao do Internal Speech Error 0x800455A0.
+
+    Apps como o qBittorrent atualizam contadores a todo momento. Se o numero
+    entrar no vocabulario, cada observacao gera uma gramatica diferente, o
+    recognizer e recriado sem parar e o motor de fala quebra.
+    """
+    assert normalizar("Semeando (12)") == "semeando"
+    assert normalizar("Semeando (13)") == "semeando"
+    assert frases_para(["Semeando (12)"]) == frases_para(["Semeando (13)"])
+
+
+def test_casamento_sobrevive_ao_contador_mudar():
+    # Vocabulario estavel, mas o alvo continua sendo o rotulo real da tela.
+    assert casar("semeando", ["Semeando (13)"]) == "Semeando (13)"
 
 
 def test_preserva_acentos():

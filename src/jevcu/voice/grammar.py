@@ -28,6 +28,9 @@ VERBOS_TEXTO = ("escrever em", "digitar em")
 
 _LIMPEZA = re.compile(r"[^\wÀ-ÿ ]+", re.UNICODE)
 _ESPACOS = re.compile(r"\s+")
+# Contador entre parenteses: "Semeando (12)". Muda a cada segundo em apps como
+# o qBittorrent. Se entrar no vocabulario, a gramatica e recompilada sem parar.
+_CONTADOR = re.compile(r"\s*\(\s*\d[\d.,]*\s*\)\s*")
 
 
 def normalizar(texto: str) -> str:
@@ -36,7 +39,8 @@ def normalizar(texto: str) -> str:
     Remove pontuacao e contadores que ninguem fala: o usuario diz "semeando",
     nao "semeando abre parenteses doze fecha parenteses".
     """
-    limpo = _LIMPEZA.sub(" ", texto)
+    sem_contador = _CONTADOR.sub(" ", texto)
+    limpo = _LIMPEZA.sub(" ", sem_contador)
     return _ESPACOS.sub(" ", limpo).strip().lower()
 
 
