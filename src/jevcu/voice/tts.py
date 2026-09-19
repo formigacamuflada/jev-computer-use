@@ -16,7 +16,13 @@ class Speaker(Protocol):
 
 
 class SapiSpeaker:
-    """Fala via System.Speech (SAPI). Sintese existe mesmo sem recognizer de STT."""
+    """Fala via System.Speech (SAPI). Sintese existe mesmo sem recognizer de STT.
+
+    Nao bloqueia. Medido nesta maquina: falar "Feito." custava 2,1 s e uma
+    frase com a descricao do candidato custava 5,9 s -- tempo que nao aparecia
+    em metrica nenhuma e que o usuario sentia como lentidao do sistema. A fala
+    e aviso, nao etapa do ciclo: ela sai enquanto a proxima escuta ja comecou.
+    """
 
     def __init__(self, voice: str = "Microsoft Maria Desktop", *, rate: int = 1) -> None:
         self._voice = voice
@@ -24,10 +30,14 @@ class SapiSpeaker:
         self._powershell = shutil.which("powershell") or shutil.which("pwsh")
         if self._powershell is None:
             raise RuntimeError("powershell nao encontrado no PATH")
+        self._pendentes: list[subprocess.Popen] = []
 
     def say(self, text: str) -> None:
         if not text.strip():
             return
+        # Recolhe as falas ja terminadas para os processos nao se acumularem
+        # numa sessao longa.
+        self._pendentes = [p for p in self._pendentes if p.poll() is None]
         # Passa o texto por stdin para nao precisar escapar aspas no comando.
         script = (
             "Add-Type -AssemblyName System.Speech; "
@@ -37,14 +47,17 @@ class SapiSpeaker:
             "$t = [Console]::In.ReadToEnd(); "
             "$s.Speak($t); $s.Dispose()"
         )
-        subprocess.run(
+        processo = subprocess.Popen(
             [self._powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-            input=text,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
         )
+        if processo.stdin is not None:
+            processo.stdin.write(text)
+            processo.stdin.close()
+        self._pendentes.append(processo)
 
 
 class SilentSpeaker:

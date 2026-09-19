@@ -71,6 +71,11 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
   projeto é `margin_confidence` — o quanto o primeiro se destacou do segundo —
   e vale igual no mock e no live. O número do provider fica em
   `choice.provider_confidence`, só para diagnóstico.
+- **A fala era o maior custo escondido do ciclo.** Bloqueante e fora de toda
+  métrica: "Feito." custava 2.083 ms e ler a descrição do candidato junto
+  custava 5.851 ms. Hoje a fala é `Popen` (19 ms de bloqueio) e só sai nos
+  desfechos em que a tela **não** mudou — `escalate`, `error`, `abstained`,
+  `exhausted`. Em sucesso o silêncio é a resposta certa: a tela já mudou.
 - **Whisper `tiny` não serve para pt-BR**: 0 de 5 acertos. `small` é o padrão.
 - **CUDA não funciona aqui**: falta `cublas64_12.dll`. Detectar isso custa
   109 ms; tentar construir na GPU custa 23 s antes de falhar. CPU int8

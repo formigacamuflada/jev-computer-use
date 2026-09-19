@@ -15,9 +15,12 @@ from .voice.grammar import casar, frases_para
 from .voice.stt import get_listener
 from .voice.tts import get_speaker
 
+# So o que a tela nao conta sozinha. Quando a acao sai, a propria tela muda e
+# e esse o retorno -- narrar "Feito, clicar em ListItem Completado 12" era ler
+# uma descricao tecnica em voz alta depois de cada comando. Os desfechos aqui
+# sao os em que NADA mudou: sem aviso, o silencio pareceria sucesso.
 OUTCOME_SPEECH = {
-    "done": "Feito.",
-    "abstained": "Nao fiz nada, nenhuma acao parecia segura.",
+    "abstained": "Nao fiz nada.",
     "exhausted": "Desisti, passos demais.",
     "escalate": "Preciso de confirmacao.",
     "error": "Deu erro.",
@@ -152,7 +155,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"=> {run.outcome}: {run.message}")
         if not args.quiet_metrics:
             print("   " + _metricas(run, stt_ms))
-        speaker.say(OUTCOME_SPEECH.get(run.outcome, "") + " " + run.message)
+        # A frase falada e curta de proposito: o detalhe esta no terminal, e a
+        # voz so precisa chamar a atencao. Ler `run.message` em voz alta
+        # custava ate 5,9 s por comando.
+        speaker.say(OUTCOME_SPEECH.get(run.outcome, ""))
         return True
 
     if args.goal:
