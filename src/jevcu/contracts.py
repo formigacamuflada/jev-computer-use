@@ -80,7 +80,12 @@ class Usage:
 
 @dataclass(frozen=True)
 class Choice:
-    """Resposta normalizada do provider de decisao."""
+    """Resposta normalizada do provider de decisao.
+
+    `confidence` e sempre calculado aqui por `margin_confidence`, nunca copiado
+    do provider -- veja o porque la. O numero que o provider mandou fica em
+    `provider_confidence` so para diagnostico; o loop nao decide por ele.
+    """
 
     selected_id: str
     confidence: float
@@ -88,10 +93,35 @@ class Choice:
     model: str | None = None
     source: str = "mock"
     usage: Usage | None = None
+    provider_confidence: float | None = None
 
 
 class DecisionError(ValueError):
     """O provider devolveu algo que nao da para confiar."""
+
+
+def margin_confidence(probabilities: Mapping[str, float]) -> float:
+    """Confianca como margem do primeiro colocado sobre o segundo.
+
+    Existe uma regua so, e e esta. O campo `confidence` que a API devolve e
+    corrigido pelo acaso: numa tabela de 24 candidatos o acaso e 1/24, numa de
+    8 e 1/8, entao o mesmo acerto obvio recebe numeros diferentes conforme a
+    tela tem mais ou menos elementos. Como o teto de candidatos varia a cada
+    observacao, comparar esse numero com um limiar fixo compara coisas
+    diferentes entre um passo e o outro.
+
+    A margem nao tem esse problema: ela pergunta o quanto o primeiro se
+    destacou do segundo, e so isso. Uma probabilidade de topo baixa entre 24
+    opcoes pode ser uma escolha excelente; duas opcoes empatadas em 0,45 sao
+    uma duvida real, por mais alta que a probabilidade pareca.
+    """
+    if not probabilities:
+        return 0.0
+    ordered = sorted(probabilities.values(), reverse=True)
+    first = ordered[0]
+    second = ordered[1] if len(ordered) > 1 else 0.0
+    total = first + second
+    return first / total if total > 0 else 0.0
 
 
 def reserved_candidates() -> list[Candidate]:

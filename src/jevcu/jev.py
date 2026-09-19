@@ -24,6 +24,7 @@ from .contracts import (
     DecisionError,
     Usage,
     criteria_from,
+    margin_confidence,
     validate_confidence,
     validate_probabilities,
 )
@@ -100,7 +101,13 @@ def parse_response(
         raise DecisionError(f"Jev escolheu candidato desconhecido: {selected!r}")
 
     probabilities = validate_probabilities(answer.get("probabilities") or {}, criteria)
-    confidence = validate_confidence(answer.get("confidence", 0.0))
+    provider_confidence = validate_confidence(answer.get("confidence", 0.0))
+    # A confianca que vale e a calculada aqui, igual a do mock: o campo da API
+    # e corrigido pelo acaso e encolhe quando a tabela cresce, entao compara-lo
+    # com um limiar fixo compara coisas diferentes a cada passo. Sem as
+    # probabilidades nao da para calcular margem nenhuma -- ai o numero do
+    # provider e melhor que zero.
+    confidence = margin_confidence(probabilities) if probabilities else provider_confidence
     model = payload.get("model")
 
     consumo = payload.get("usage") or {}
@@ -117,6 +124,7 @@ def parse_response(
         model=model if isinstance(model, str) else None,
         source="live",
         usage=usage,
+        provider_confidence=provider_confidence,
     )
 
 
@@ -231,17 +239,9 @@ def mock_chooser(
     probabilities = {cid: value / total for cid, value in scores.items()}
     selected = max(probabilities, key=lambda cid: probabilities[cid])
 
-    # Confianca e margem sobre o segundo colocado, nao a probabilidade crua.
-    # Uma distribuicao entre muitos candidatos dilui a probabilidade do topo
-    # mesmo quando a escolha e obvia; a margem e que diz se houve duvida.
-    ordered = sorted(probabilities.values(), reverse=True)
-    first = ordered[0]
-    second = ordered[1] if len(ordered) > 1 else 0.0
-    confidence = first / (first + second) if (first + second) > 0 else 0.0
-
     return Choice(
         selected_id=selected,
-        confidence=confidence,
+        confidence=margin_confidence(probabilities),
         probabilities=probabilities,
         model="mock",
         source="mock",

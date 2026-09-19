@@ -45,6 +45,11 @@ juiz.** Aconteceu três vezes.
 3. **Casar por substring.** "parado" está dentro de "separado". Hoje exige
    sequência inteira de palavras.
 
+Um quarto padrão, de outra família: **duas descrições iguais na tabela são a
+mesma pergunta feita duas vezes.** O Jev não responde 50/50 a um empate exato
+— desempata pela primeira chave e ainda relata confiança alta. O loop lia isso
+como certeza. Hoje `build_candidates` descarta descrição repetida.
+
 Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord para
 256 tokens de um orçamento de 6000 — isso é perda de informação, não economia.
 
@@ -52,6 +57,12 @@ Outro padrão: **redução alta não é sucesso.** O `fit()` cortava o Discord p
 
 - **Estimador de tokens**: 1,7 caractere por token, calibrado contra o `usage`
   real. A régua de 4 caracteres errava por 2,4×.
+- **O campo `confidence` da API não serve de limiar.** É corrigido pelo acaso,
+  então encolhe quando a tabela de candidatos cresce: o mesmo acerto óbvio
+  recebe números diferentes conforme a tela tem 8 ou 24 elementos. A régua do
+  projeto é `margin_confidence` — o quanto o primeiro se destacou do segundo —
+  e vale igual no mock e no live. O número do provider fica em
+  `choice.provider_confidence`, só para diagnóstico.
 - **Whisper `tiny` não serve para pt-BR**: 0 de 5 acertos. `small` é o padrão.
 - **CUDA não funciona aqui**: falta `cublas64_12.dll`. Detectar isso custa
   109 ms; tentar construir na GPU custa 23 s antes de falhar. CPU int8

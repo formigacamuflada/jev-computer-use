@@ -32,8 +32,16 @@ def build_candidates(
     321 elementos da tela e o Jev recebe uma lista de 24 que nao o contem --
     ele entao escolhe mal ou se abstem, e parece que errou quando na verdade
     a pergunta e que estava errada.
+
+    Descricoes repetidas sao descartadas. Duas linhas identicas na tabela sao
+    a mesma pergunta feita duas vezes: o Jev nao responde 50/50 a um empate
+    exato, ele desempata pela primeira chave e ainda relata confianca alta.
+    Isso vira um numero que o loop trata como certeza sem que discriminacao
+    nenhuma tenha acontecido. Uma linha so diz a verdade e custa menos.
     """
     candidates: list[Candidate] = []
+    # Descricao -> ja esta na tabela. E a descricao, nao o ID, que o Jev le.
+    vistas: set[str] = set()
     reservado: Candidate | None = None
 
     if must_include:
@@ -43,6 +51,10 @@ def build_candidates(
         )
         if alvo is not None:
             reservado = _candidate_for(alvo, observation, text_to_type)
+            if reservado is not None:
+                # Reservado entra nas vistas antes do laco: se houver copia
+                # mais adiante, quem sobrevive e o alvo pedido.
+                vistas.add(reservado.description)
 
     teto = max_candidates - 1 if reservado is not None else max_candidates
     for element in observation.elements:
@@ -51,8 +63,10 @@ def build_candidates(
         if not element.enabled or not element.name:
             continue
         candidate = _candidate_for(element, observation, text_to_type)
-        if candidate is not None:
-            candidates.append(candidate)
+        if candidate is None or candidate.description in vistas:
+            continue
+        vistas.add(candidate.description)
+        candidates.append(candidate)
 
     if reservado is not None and not any(c.id == reservado.id for c in candidates):
         candidates.append(reservado)
