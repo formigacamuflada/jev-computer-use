@@ -72,6 +72,7 @@ class Agent:
         app: str | None = None,
         dry_run: bool = False,
         must_include: str | None = None,
+        speech_hint: dict[str, Any] | None = None,
     ) -> Run:
         history: list[dict[str, Any]] = []
         steps: list[Step] = []
@@ -97,10 +98,17 @@ class Agent:
                 return Run(goal, "error", steps, "nenhuma acao possivel na tela observada")
 
             # (5) decisao: o Jev ve so o que precisa para escolher
+            compacta = observation.compact()
+            if speech_hint:
+                # A dica diz o que o reconhecedor achou, sem decidir por ele.
+                # Reescrever o objetivo como "clicar em X" apagava a frase
+                # original, e o Jev confirmava qualquer coisa: contar uma
+                # historia com a palavra "parado" virava um clique.
+                compacta["speech"] = speech_hint
             try:
                 choice = self._chooser(
                     goal=goal,
-                    observation=observation.compact(),
+                    observation=compacta,
                     history=history,
                     candidates=candidates,
                 )

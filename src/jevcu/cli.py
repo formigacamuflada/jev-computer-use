@@ -94,14 +94,22 @@ def main(argv: list[str] | None = None) -> int:
 
     agent = Agent(driver, chooser, config, on_event=lambda kind, text: print(f"[{kind}] {text}"))
 
-    def handle(goal: str, must_include: str | None = None) -> bool:
+    def handle(
+        goal: str,
+        must_include: str | None = None,
+        speech_hint: dict | None = None,
+    ) -> bool:
         """Devolve False quando o usuario interrompeu a decisao."""
         ao_vivo = args.decide == "live"
         if ao_vivo:
             print("[decidindo] consultando o Jev...", end="", flush=True)
         try:
             run = agent.run(
-                goal, app=args.app, dry_run=args.dry_run, must_include=must_include
+                goal,
+                app=args.app,
+                dry_run=args.dry_run,
+                must_include=must_include,
+                speech_hint=speech_hint,
             )
         except KeyboardInterrupt:
             # Ctrl+C durante uma chamada lenta nao deve despejar traceback.
@@ -120,9 +128,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Modo interativo / por voz
+    if stt_backend == "whisper":
+        # Carregar o small custa cerca de 10 s uma vez por sessao. Sem aviso,
+        # parece travamento e a pessoa desiste antes de comecar.
+        print(f"carregando o modelo {args.model} (uma vez por sessao)...",
+              end="", flush=True)
     listener = get_listener(
         stt_backend, language=config.language, mic=args.mic, model=args.model
     )
+    if stt_backend == "whisper":
+        print(" pronto.")
     por_voz = stt_backend != "text"
     detalhe = stt_backend
     if stt_backend == "whisper":
@@ -193,7 +208,14 @@ def main(argv: list[str] | None = None) -> int:
         alvo = casar(falado, rotulos) if rotulos else None
         if alvo:
             print(f"[alvo] {alvo!r}")
-            if not handle(f"clicar em {alvo}", must_include=alvo):
+            # O objetivo e a frase ORIGINAL; o rotulo vai como dica. Assim o
+            # Jev julga se aquilo foi mesmo um comando, em vez de receber um
+            # pedido ja mastigado que ele so confirma.
+            if not handle(
+                falado,
+                must_include=alvo,
+                speech_hint={"heard": falado, "recognizer_guess": alvo},
+            ):
                 break
             continue
 

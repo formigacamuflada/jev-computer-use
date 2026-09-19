@@ -227,31 +227,52 @@ class WhisperListener:
         So construir o modelo prova que o caminho funciona.
         """
         tentativas: list[tuple[str, str]] = []
-        try:
-            import ctranslate2
-
-            if ctranslate2.get_cuda_device_count() > 0:
-                tentativas.append(("cuda", compute or "float16"))
-        except Exception:
-            pass
+        if WhisperListener._cuda_utilizavel():
+            tentativas.append(("cuda", compute or "float16"))
         tentativas.append(("cpu", compute or "int8"))
 
         import numpy as np
-
-        # Meio segundo de silencio so para forcar o caminho de inferencia.
-        # Construir o modelo na GPU e preguicoso: as bibliotecas CUDA so sao
-        # carregadas na primeira transcricao, e e la que falta a cuBLAS.
-        aquecimento = np.zeros(8000, dtype=np.float32)
 
         ultimo: Exception | None = None
         for dispositivo, precisao in tentativas:
             try:
                 modelo = WhisperModel(model_size, device=dispositivo, compute_type=precisao)
-                list(modelo.transcribe(aquecimento, language="pt", beam_size=1)[0])
+                if dispositivo == "cuda":
+                    # A GPU carrega as bibliotecas so na primeira inferencia,
+                    # entao construir com sucesso nao prova nada. Na CPU nao ha
+                    # esse problema, e aquecer la custa 5 s de partida a toa.
+                    list(modelo.transcribe(
+                        np.zeros(8000, dtype=np.float32), language="pt", beam_size=1
+                    )[0])
                 return modelo, f"{dispositivo}/{precisao}"
             except Exception as exc:
                 ultimo = exc
         raise RuntimeError(f"nao foi possivel carregar o modelo {model_size!r}: {ultimo}")
+
+    @staticmethod
+    def _cuda_utilizavel() -> bool:
+        """GPU presente E com as bibliotecas de runtime no lugar.
+
+        `ctranslate2.get_cuda_device_count()` conta a placa mesmo sem cuBLAS
+        instalada, e construir o modelo na GPU leva 23 s antes de falhar. Uma
+        tentativa de carregar a DLL custa milissegundos e evita essa espera.
+        """
+        try:
+            import ctranslate2
+
+            if ctranslate2.get_cuda_device_count() <= 0:
+                return False
+        except Exception:
+            return False
+
+        import ctypes
+
+        for dll in ("cublas64_12.dll", "cudnn_ops64_9.dll"):
+            try:
+                ctypes.WinDLL(dll)
+            except OSError:
+                return False
+        return True
 
     @staticmethod
     def dispositivos() -> list[tuple[int, str, bool]]:
