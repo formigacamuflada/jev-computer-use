@@ -1,8 +1,12 @@
 """Camada de percepcao e acao: Cua Driver.
 
 O Driver e dono da captura, das coordenadas, da execucao e da verificacao.
-Esta camada so o embrulha e compacta a observacao para caber no state do Jev
-(32k tokens para state + maior pergunta).
+Esta camada so o embrulha e compacta a observacao para caber no state do Jev.
+
+Backends:
+  CuaDriver   binario cua-driver via daemon. Observa e AGE.
+  UiaDriver   UI Automation por PowerShell. So observa; nao instala nada.
+  MockDriver  em memoria, para testes.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ class Element:
     name: str
     enabled: bool = True
     bounds: tuple[int, int, int, int] | None = None
+    # Identificadores do Cua Driver. Valem so para o snapshot que os produziu.
+    index: int | None = None
+    token: str | None = None
 
     def compact(self) -> dict[str, Any]:
         """Forma enxuta que vai para o Jev. Sem coordenada: ele nao precisa."""
@@ -44,12 +51,14 @@ class Observation:
     elements: list[Element] = field(default_factory=list)
     capture_id: str | None = None
     tree: Node | None = None
+    pid: int | None = None
+    window_id: int | None = None
 
     def compact(self, limit: int = 40, *, budget_tokens: int = 6000) -> dict[str, Any]:
         """Forma que vai no state do Jev.
 
-        Com arvore, usa esqueleto ajustado ao orcamento: telas densas nao cabem
-        inteiras nos 32k do Jev. Sem arvore, cai na lista plana.
+        Com arvore, usa esqueleto ajustado ao orcamento. Sem arvore, cai na
+        lista plana de elementos.
         """
         base: dict[str, Any] = {"app": self.app, "window": self.window_title}
 
@@ -74,14 +83,58 @@ class Driver(Protocol):
     def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
 
-class CuaDriver:
-    """Fala com o binario `cua-driver` por JSON no stdout.
+# --------------------------------------------------------------------------
+# Cua Driver
+# --------------------------------------------------------------------------
 
-    Instale antes (PowerShell):  irm https://cua.ai/driver/install.ps1 | iex
+DEFAULT_BINARY = "cua-driver"
+
+
+def build_tree(elements: list[dict[str, Any]], *, window_title: str) -> Node:
+    """Reconstroi a arvore a partir da lista plana e dos `parent_index`.
+
+    O Driver devolve os elementos achatados, cada um apontando para o pai. A
+    hierarquia importa para o esqueleto, entao remontamos aqui.
+    """
+    children: dict[int | None, list[dict[str, Any]]] = {}
+    for element in elements:
+        children.setdefault(element.get("parent_index"), []).append(element)
+
+    def build(raw: dict[str, Any]) -> Node:
+        index = raw.get("element_index")
+        return Node(
+            ref=str(raw.get("element_token") or index),
+            role=str(raw.get("role") or "Unknown"),
+            name=str(raw.get("label") or ""),
+            enabled=bool(raw.get("enabled", True)),
+            children=tuple(build(child) for child in children.get(index, [])),
+        )
+
+    roots = children.get(None, [])
+    if len(roots) == 1:
+        return build(roots[0])
+    # Sem raiz unica: pendura tudo sob uma raiz sintetica.
+    return Node("root", "Window", window_title, children=tuple(build(r) for r in roots))
+
+
+class CuaDriver:
+    """Fala com o binario `cua-driver` pelo daemon.
+
+    Instale:  irm https://cua.ai/driver/install.ps1 | iex
+    Suba o daemon:  cua-driver autostart kick
+
+    A CLI recebe os argumentos como um unico JSON posicional:
+        cua-driver call <tool> '{"pid":123,...}'
     """
 
-    def __init__(self, binary: str = "cua-driver", *, timeout: float = 30.0) -> None:
-        resolved = shutil.which(binary)
+    def __init__(
+        self,
+        binary: str = DEFAULT_BINARY,
+        *,
+        timeout: float = 60.0,
+        max_elements: int = 1500,
+    ) -> None:
+        resolved = shutil.which(binary) or (binary if "/" in binary or "\\" in binary else None)
         if resolved is None:
             raise DriverError(
                 f"binario {binary!r} nao encontrado no PATH. "
@@ -89,127 +142,101 @@ class CuaDriver:
             )
         self._binary = resolved
         self._timeout = timeout
+        self._max_elements = max_elements
 
-    def _run(self, args: list[str]) -> dict[str, Any]:
+    def call(self, tool: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = json.dumps(arguments or {}, ensure_ascii=False)
         try:
             proc = subprocess.run(
-                [self._binary, *args, "--json"],
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-                check=False,
+                [self._binary, "call", tool, payload],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=self._timeout, check=False,
             )
         except subprocess.TimeoutExpired:
-            raise DriverError(f"cua-driver estourou o timeout em: {' '.join(args)}") from None
+            raise DriverError(f"timeout em {tool}") from None
 
         if proc.returncode != 0:
-            raise DriverError(f"cua-driver falhou ({proc.returncode}): {proc.stderr.strip()[:300]}")
+            detail = (proc.stderr or proc.stdout).strip()[:300]
+            raise DriverError(f"{tool} falhou: {detail}")
 
         try:
-            return json.loads(proc.stdout)
+            result = json.loads(proc.stdout)
         except json.JSONDecodeError:
-            raise DriverError(f"cua-driver devolveu JSON invalido: {proc.stdout[:200]}") from None
+            raise DriverError(f"{tool} devolveu JSON invalido: {proc.stdout[:200]}") from None
+
+        if result.get("isError"):
+            raise DriverError(f"{tool}: {str(result)[:300]}")
+        return result
+
+    def list_windows(self, pid: int | None = None) -> list[dict[str, Any]]:
+        result = self.call("list_windows", {"pid": pid} if pid else {})
+        content = result.get("structuredContent", result)
+        return content.get("windows") or []
+
+    def _pick_window(self, app: str | None) -> dict[str, Any]:
+        windows = self.list_windows()
+        if not windows:
+            raise DriverError("nenhuma janela visivel")
+        if app:
+            needle = app.lower()
+            for window in windows:
+                haystack = f"{window.get('app_name','')} {window.get('title','')}".lower()
+                if needle in haystack:
+                    return window
+            raise DriverError(f"nenhuma janela casa com {app!r}")
+        return windows[0]
 
     def observe(self, app: str | None = None) -> Observation:
-        args = ["snapshot", "-i"]
-        if app:
-            args += ["--app", app]
-        payload = self._run(args)
-        return parse_observation(payload)
+        window = self._pick_window(app)
+        pid = window.get("pid")
+        window_id = window.get("window_id")
 
-    def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        args = [tool]
-        for key, value in arguments.items():
-            if key == "ref":
-                args.append(str(value))
-            else:
-                args += [f"--{key.replace('_', '-')}", str(value)]
-        return self._run(args)
+        result = self.call("get_window_state", {
+            "pid": pid,
+            "window_id": window_id,
+            "include_screenshot": False,
+            "max_elements": self._max_elements,
+        })
+        content = result.get("structuredContent", result)
+        raw_elements = content.get("elements") or []
 
-
-def parse_observation(payload: dict[str, Any]) -> Observation:
-    """Normaliza a resposta do Driver. Tolerante ao formato exato do snapshot."""
-    data = payload.get("data", payload)
-    raw_elements = data.get("elements") or data.get("nodes") or []
-
-    elements: list[Element] = []
-    for raw in raw_elements:
-        if not isinstance(raw, dict):
-            continue
-        ref = raw.get("ref") or raw.get("id")
-        if not ref:
-            continue
-        bounds = raw.get("bounds")
-        parsed_bounds = None
-        if isinstance(bounds, dict):
-            parsed_bounds = (
-                int(bounds.get("x", 0)),
-                int(bounds.get("y", 0)),
-                int(bounds.get("width", 0)),
-                int(bounds.get("height", 0)),
-            )
-        elements.append(
+        elements = [
             Element(
-                ref=str(ref),
-                role=str(raw.get("role") or raw.get("type") or "Unknown"),
-                name=str(raw.get("name") or raw.get("title") or raw.get("text") or ""),
+                ref=str(raw.get("element_token") or raw.get("element_index")),
+                role=str(raw.get("role") or "Unknown"),
+                name=str(raw.get("label") or ""),
                 enabled=bool(raw.get("enabled", True)),
-                bounds=parsed_bounds,
+                index=raw.get("element_index"),
+                token=raw.get("element_token"),
             )
+            for raw in raw_elements
+        ]
+        window_title = str(content.get("window_title") or "")
+
+        return Observation(
+            snapshot_id=str(content.get("snapshot_id") or "s0"),
+            app=str(content.get("app_name") or "desconhecido"),
+            window_title=window_title,
+            elements=elements,
+            tree=build_tree(raw_elements, window_title=window_title) if raw_elements else None,
+            pid=pid,
+            window_id=window_id,
         )
 
-    return Observation(
-        snapshot_id=str(data.get("snapshot_id") or data.get("snapshot") or "s0"),
-        app=str(data.get("app") or "desconhecido"),
-        window_title=str(data.get("window") or data.get("title") or ""),
-        elements=elements,
-        capture_id=data.get("capture_id"),
-    )
-
-
-class MockDriver:
-    """Driver falso para desenvolver e testar sem instalar nada.
-
-    Guarda o que foi executado para os testes verificarem a pos-condicao de
-    forma independente, em vez de confiar na resposta da acao.
-    """
-
-    def __init__(self, observations: list[Observation] | None = None) -> None:
-        self._observations = observations or [_default_observation()]
-        self._index = 0
-        self.executed: list[tuple[str, dict[str, Any]]] = []
-
-    def observe(self, app: str | None = None) -> Observation:
-        observation = self._observations[min(self._index, len(self._observations) - 1)]
-        self._index += 1
-        return observation
-
     def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.executed.append((tool, dict(arguments)))
-        return {"ok": True, "tool": tool, "arguments": arguments}
+        return self.call(tool, arguments)
 
 
-def _default_observation() -> Observation:
-    return Observation(
-        snapshot_id="s_mock_1",
-        app="Bloco de Notas",
-        window_title="Sem titulo - Bloco de Notas",
-        elements=[
-            Element("e1", "Button", "Salvar"),
-            Element("e2", "Button", "Cancelar"),
-            Element("e3", "Edit", "Nome do arquivo"),
-            Element("e4", "Button", "Nova pasta"),
-            Element("e5", "MenuItem", "Arquivo"),
-            Element("e6", "MenuItem", "Editar"),
-        ],
-    )
-
+# --------------------------------------------------------------------------
+# UI Automation direto (somente leitura)
+# --------------------------------------------------------------------------
 
 class UiaDriver:
-    """Le a arvore de UI Automation do Windows e age por teclado/mouse.
+    """Le a arvore de UI Automation via PowerShell.
 
-    Ponte ate o Cua Driver estar instalado: observa telas reais hoje, mas nao
-    executa acoes -- `execute` falha de proposito em vez de fingir sucesso.
+    Nao instala nada, mas nao age: `execute` falha de proposito em vez de
+    fingir sucesso. Util para inspecionar telas sem o daemon do Cua.
     """
 
     def __init__(self, *, process: str | None = None, max_nodes: int = 1200) -> None:
@@ -245,6 +272,49 @@ class UiaDriver:
 
     def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         raise DriverError(
-            "UiaDriver e somente leitura. Instale o Cua Driver para executar acoes: "
-            "irm https://cua.ai/driver/install.ps1 | iex"
+            "UiaDriver e somente leitura. Use --driver cua para executar acoes."
         )
+
+
+# --------------------------------------------------------------------------
+# Mock
+# --------------------------------------------------------------------------
+
+class MockDriver:
+    """Driver falso para desenvolver e testar sem instalar nada.
+
+    Guarda o que foi executado para os testes verificarem a pos-condicao de
+    forma independente, em vez de confiar na resposta da acao.
+    """
+
+    def __init__(self, observations: list[Observation] | None = None) -> None:
+        self._observations = observations or [_default_observation()]
+        self._index = 0
+        self.executed: list[tuple[str, dict[str, Any]]] = []
+
+    def observe(self, app: str | None = None) -> Observation:
+        observation = self._observations[min(self._index, len(self._observations) - 1)]
+        self._index += 1
+        return observation
+
+    def execute(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.executed.append((tool, dict(arguments)))
+        return {"ok": True, "tool": tool, "arguments": arguments}
+
+
+def _default_observation() -> Observation:
+    return Observation(
+        snapshot_id="s_mock_1",
+        app="Bloco de Notas",
+        window_title="Sem titulo - Bloco de Notas",
+        elements=[
+            Element("e1", "Button", "Salvar", index=1),
+            Element("e2", "Button", "Cancelar", index=2),
+            Element("e3", "Edit", "Nome do arquivo", index=3),
+            Element("e4", "Button", "Nova pasta", index=4),
+            Element("e5", "MenuItem", "Arquivo", index=5),
+            Element("e6", "MenuItem", "Editar", index=6),
+        ],
+        pid=1234,
+        window_id=5678,
+    )

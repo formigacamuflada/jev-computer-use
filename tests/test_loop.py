@@ -41,9 +41,9 @@ def test_elemento_desabilitado_nao_vira_candidato():
 
 def test_campo_de_texto_so_aparece_se_houver_texto():
     sem_texto = build_candidates(_observation())
-    assert not [c for c in sem_texto if c.tool == "type"]
+    assert not [c for c in sem_texto if c.tool == "type_text"]
     com_texto = build_candidates(_observation(), text_to_type="relatorio")
-    assert [c for c in com_texto if c.tool == "type"]
+    assert [c for c in com_texto if c.tool == "type_text"]
 
 
 # --- validacao: o ponto em que o sistema falha fechado ---

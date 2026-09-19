@@ -7,7 +7,7 @@ import sys
 
 from .candidates import build_candidates, describe_table
 from .config import Config, load_typesafe_key
-from .driver import CuaDriver, DriverError, MockDriver
+from .driver import CuaDriver, DriverError, MockDriver, UiaDriver
 from .jev import get_chooser
 from .loop import Agent
 from .voice.stt import get_listener
@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jevcu", description="Computer use por voz com Jev")
     parser.add_argument("goal", nargs="*", help="comando (se vazio, entra em modo interativo)")
     parser.add_argument("--app", help="limitar a observacao a um aplicativo")
-    parser.add_argument("--driver", choices=["mock", "cli"], help="backend do Driver")
+    parser.add_argument("--driver", choices=["mock", "cua", "uia"], help="backend do Driver")
     parser.add_argument("--decide", choices=["mock", "live"], default="mock", help="backend Jev")
     parser.add_argument("--stt", choices=["text", "winrt", "whisper"], help="backend de voz")
     parser.add_argument("--dry-run", action="store_true", help="decidir sem executar")
@@ -45,9 +45,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- Driver ---
     try:
-        driver = (
-            CuaDriver(config.driver_binary) if driver_backend == "cli" else MockDriver()
-        )
+        if driver_backend == "cua":
+            driver = CuaDriver(config.driver_binary)
+        elif driver_backend == "uia":
+            driver = UiaDriver(process=args.app)
+        else:
+            driver = MockDriver()
     except DriverError as exc:
         print(f"erro: {exc}", file=sys.stderr)
         return 2

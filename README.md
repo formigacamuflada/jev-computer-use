@@ -92,6 +92,36 @@ scripts/ocr.ps1   helper WinRT do OCR
 tests/            14 testes, rodam offline
 ```
 
+## Cua Driver
+
+```powershell
+irm https://cua.ai/driver/install.ps1 | iex
+cua-driver autostart kick      # sobe o daemon sem precisar relogar
+```
+
+```bash
+set PYTHONPATH=src
+python -m jevcu --driver cua --app qbittorrent --show-table
+python -m jevcu --driver cua --app qbittorrent --dry-run clicar em Semeando
+```
+
+A CLI recebe os argumentos como um unico JSON posicional
+(`cua-driver call <tool> '{...}'`), e o alvo de uma acao e
+`pid` + `window_id` + `element_index` do snapshot corrente.
+As acoes usam `delivery_mode: background`, que nao rouba o foco -- o contrato
+do Driver trata isso como primeira tentativa obrigatoria, nao como sugestao.
+
+### Loop completo contra o qBittorrent ao vivo
+
+```
+elementos           : 321
+arvore inteira      : 6186 tokens
+esqueleto enviado   : 1785 tokens (profundidade 8)
+reducao             : 71.1%
+acao produzida      : click {pid, window_id, element_index: 18,
+                             delivery_mode: background}
+```
+
 ## Serialização da árvore de UI
 
 `tree.py` compacta a árvore antes de mandar pro Jev: visão rasa, ramos densos
