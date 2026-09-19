@@ -94,11 +94,18 @@ tests/            14 testes, rodam offline
 
 ## Voz (pt-BR)
 
-```bash
+```powershell
 pip install winrt-runtime winrt-Windows.Media.SpeechRecognition winrt-Windows.Globalization
-set PYTHONPATH=src
-python -m jevcu --stt winrt --driver cua --app qbittorrent --dry-run
+
+.\scriptsoz.ps1                       # qBittorrent, dry-run (não clica)
+.\scriptsoz.ps1 -App Discord
+.\scriptsoz.ps1 -Texto                # digitado, para desenvolver
+.\scriptsoz.ps1 -App chrome -Executar  # sai do dry-run: clica de verdade
 ```
+
+O lançador resolve o binário, sobe o daemon se estiver parado e ajusta o
+`PYTHONPATH`. Use PowerShell — `set VAR=x && cmd` é sintaxe de `cmd.exe` e não
+funciona no PowerShell 5.1.
 
 **O vocabulário sai da tela.** O reconhecimento offline do Windows exige uma
 lista fechada de frases — o que parece limitação, mas casa com a arquitetura:
