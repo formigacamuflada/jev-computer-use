@@ -17,7 +17,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .tree import Node, estimate_tokens, fit, interactive_nodes
+from .tree import Node, fit, interactive_nodes
 
 
 @dataclass(frozen=True)
@@ -63,10 +63,11 @@ class Observation:
         base: dict[str, Any] = {"app": self.app, "window": self.window_title}
 
         if self.tree is not None:
-            payload, depth = fit(self.tree, budget_tokens=budget_tokens)
-            base["skeleton"] = payload
-            base["skeleton_depth"] = depth
-            base["est_tokens"] = estimate_tokens(payload)
+            fitted = fit(self.tree, budget_tokens=budget_tokens)
+            base["skeleton"] = fitted.payload
+            base["skeleton_depth"] = fitted.depth
+            base["skeleton_width"] = fitted.max_children
+            base["est_tokens"] = fitted.tokens
             return base
 
         base["elements"] = [e.compact() for e in self.elements[:limit]]

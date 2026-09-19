@@ -133,32 +133,41 @@ truncados com `children_count` e uma alça `drill`, e nós estruturais anônimos
 sem instalar nada. É ponte até o Cua Driver — `UiaDriver` é **somente leitura**:
 `execute()` falha de propósito em vez de fingir que agiu.
 
-### Medições em janelas reais desta máquina
+### Medições em janelas reais (via Cua Driver)
 
 ```
-app              nós   leitura   acionáveis   árvore    esqueleto   redução
-qbittorrent      259    230 ms      167       3133 tok   1233 tok    60.6%
-chrome            79    107 ms       31        944 tok    643 tok    31.9%
-Discord           74     91 ms       20        821 tok    636 tok    22.5%
+app           elems   árvore   esqueleto   prof x larg
+Discord         742    10694        3356      3 x 200   (Electron)
+WhatsApp        220     5094        5094      6 x 100   (cabe inteira)
+qbittorrent     321     6187        5790     20 x 100
+Configurações     0        0           0        —       (UWP: opaco)
 ```
 
-**Correção de uma premissa minha.** Eu disse que telas reais não caberiam nos
-32k de state do Jev. Não se confirmou: a janela mais densa aqui deu 3133 tokens,
-uma ordem de grandeza abaixo do limite. O esqueleto continua valendo a pena —
-60% menos tokens é mais barato e menos ruído pro modelo — mas não é o bloqueio
-que eu supus. Ele volta a importar em listas grandes (Explorer com milhares de
-arquivos, planilhas) e quando várias janelas entram no mesmo state.
+Orçamento de 6000 tokens; o limite de state do Jev é 32k. Nenhuma janela real
+desta máquina chega perto do teto — a maior árvore inteira deu 10694 tokens.
 
-### Duas limitações do UIA que mudam o desenho
+**`fit()` ajusta profundidade E largura.** A primeira versão só variava
+profundidade e desperdiçava o orçamento: o Discord ficava em 256 tokens de
+6000 disponíveis. A causa é a forma da árvore — `Document` → um único
+`Group "app-mount"` com **451 filhos diretos**. Árvore rasa e larguíssima, onde
+mexer na profundidade não muda nada. Corrigido, o mesmo Discord entrega 3356
+tokens de informação útil dentro do mesmo orçamento.
 
-**Conteúdo web é invisível.** A árvore do Chrome traz a casca do navegador
-(abas, barra de endereço, botões) e dois nós `Document` vazios — nenhum elemento
-da página. Para web, o caminho é CDP (o Cua Driver expõe `--cdp`) ou parsing
-visual, não UIA.
+A lição que virou teste de regressão: **redução alta não é sucesso.** Cortar
+abaixo do orçamento é perda de informação, não economia.
 
-**Apps UWP não descem.** `SystemSettings` e `ApplicationFrameHost` devolvem 1 nó.
-O handle é do frame host, não da janela real; precisa resolver o filho antes de
-caminhar.
+### Limitações confirmadas com o Cua Driver
+
+**Conteúdo web:** UIA puro via PowerShell não ativa a acessibilidade completa
+do Chromium e devolve só a casca do navegador (79 nós). O Cua Driver ativa, e a
+mesma classe de janela passa a entregar 220-742 elementos com o conteúdo da
+página. Para interagir, as ferramentas `browser_*` via CDP são o caminho certo;
+UIA serve para ler.
+
+**Apps UWP são opacos.** `SystemSettings` e `ApplicationFrameHost` devolvem
+**0 elementos até pelo Cua Driver**, testados pelos dois pids. Não é limitação
+da ponte em PowerShell. Configurações do Windows, Mail e afins ficam fora do
+alcance semântico; para eles só resta o caminho visual.
 
 ## Notas de implementação
 

@@ -86,17 +86,36 @@ def test_drill_em_ref_inexistente_falha():
 
 def test_fit_respeita_o_orcamento():
     tree = _wide_tree(20, 30)   # 600+ nos
-    payload, depth = fit(tree, budget_tokens=500)
-    assert estimate_tokens(payload) <= 500
-    assert depth >= 1
+    fitted = fit(tree, budget_tokens=500)
+    assert fitted.tokens <= 500
+    assert fitted.depth >= 1
 
 
-def test_fit_usa_a_maior_profundidade_que_couber():
+def test_fit_aproveita_orcamento_maior():
     tree = _wide_tree(3, 3)
-    generoso, fundo = fit(tree, budget_tokens=100_000)
-    apertado, raso = fit(tree, budget_tokens=60)
-    assert fundo > raso
-    assert estimate_tokens(generoso) > estimate_tokens(apertado)
+    generoso = fit(tree, budget_tokens=100_000)
+    apertado = fit(tree, budget_tokens=60)
+    assert generoso.nodes > apertado.nodes
+    assert generoso.tokens > apertado.tokens
+
+
+def test_fit_alarga_quando_a_arvore_e_rasa_e_larga():
+    """Regressao: arvore estilo Electron, um unico pai com centenas de filhos.
+
+    Ajustar so a profundidade nao muda nada aqui -- o corte esta na largura.
+    O fit tem que gastar o orcamento alargando.
+    """
+    largo = Node("root", "Document", "app", children=(
+        Node("mount", "Group", "app-mount", children=tuple(
+            Node(f"i{i}", "Button", f"item numero {i}") for i in range(400)
+        )),
+    ))
+    apertado = fit(largo, budget_tokens=300)
+    folgado = fit(largo, budget_tokens=6000)
+
+    assert folgado.nodes > apertado.nodes * 5, "nao aproveitou o orcamento maior"
+    assert folgado.max_children > apertado.max_children, "nao alargou"
+    assert folgado.tokens <= 6000
 
 
 def test_orcamento_invalido_e_rejeitado():

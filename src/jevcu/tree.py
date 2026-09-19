@@ -113,28 +113,65 @@ def drill(root: Node, ref: str, *, max_depth: int = 3, max_children: int = 20) -
     return _render(target, 0, max_depth, max_children)
 
 
-def fit(
-    root: Node,
-    *,
-    budget_tokens: int,
-    max_children: int = 12,
-    max_depth: int = 8,
-) -> tuple[dict[str, Any], int]:
-    """Maior esqueleto que cabe no orcamento.
+@dataclass(frozen=True)
+class Fitted:
+    """Esqueleto escolhido para um orcamento, com os parametros que o geraram."""
 
-    Tenta do mais detalhado para o mais raso e devolve o primeiro que couber,
-    junto com a profundidade usada. Na profundidade 1 devolve o que houver,
-    mesmo que estoure: cortar mais perderia a raiz.
+    payload: dict[str, Any]
+    depth: int
+    max_children: int
+    tokens: int
+    nodes: int
+
+
+# Grade de busca. Arvores reais variam muito de forma: qBittorrent e profunda e
+# estreita, Electron e rasa e larguissima (o Discord tem um unico Group com 451
+# filhos diretos). Ajustar so a profundidade nao serve para as duas.
+_DEPTHS = (2, 3, 4, 6, 8, 12, 20)
+_WIDTHS = (12, 25, 50, 100, 200, 400, 800)
+
+
+def _count_nodes(payload: dict[str, Any]) -> int:
+    total = 1
+    for child in payload.get("children", []):
+        total += _count_nodes(child)
+    return total
+
+
+def fit(root: Node, *, budget_tokens: int, max_depth: int = 20) -> Fitted:
+    """Esqueleto que extrai mais informacao dentro do orcamento.
+
+    Busca em profundidade E largura. Ajustar so a profundidade desperdica o
+    orcamento em arvores largas: a do Discord fica em 256 tokens de um teto de
+    6000 porque o corte real esta nos filhos, nao nos niveis.
+
+    Escolhe o candidato com mais nos que ainda cabe, e nao simplesmente o
+    menor: cortar abaixo do orcamento e perda de informacao, nao economia.
     """
     if budget_tokens <= 0:
         raise ValueError("budget_tokens deve ser positivo")
 
-    for depth in range(max_depth, 0, -1):
-        payload = skeleton(root, max_depth=depth, max_children=max_children)
-        if estimate_tokens(payload) <= budget_tokens:
-            return payload, depth
+    best: Fitted | None = None
+    for depth in _DEPTHS:
+        if depth > max_depth:
+            continue
+        for width in _WIDTHS:
+            payload = skeleton(root, max_depth=depth, max_children=width)
+            tokens = estimate_tokens(payload)
+            if tokens > budget_tokens:
+                # Mais largura so piora daqui para frente nesta profundidade.
+                break
+            nodes = _count_nodes(payload)
+            if best is None or nodes > best.nodes:
+                best = Fitted(payload, depth, width, tokens, nodes)
 
-    return skeleton(root, max_depth=1, max_children=max_children), 1
+    if best is not None:
+        return best
+
+    # Nem o menor candidato cabe: devolve o minimo viavel mesmo estourando,
+    # porque cortar mais perderia a raiz.
+    payload = skeleton(root, max_depth=1, max_children=_WIDTHS[0])
+    return Fitted(payload, 1, _WIDTHS[0], estimate_tokens(payload), _count_nodes(payload))
 
 
 def interactive_nodes(root: Node, *, limit: int | None = None) -> list[Node]:
